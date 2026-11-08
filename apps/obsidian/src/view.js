@@ -18,23 +18,52 @@
 //    undo) before Obsidian's hotkeys while the view is focused.
 //  - MOBILE: header buttons for Undo, Redo and Fit; Obsidian's edge swipes never
 //    start on the canvas (data-ignore-swipe).
+//  - POP-OUT WINDOWS: a view moved to another window keeps its editor, which
+//    then observes from that window (handleResize). Elements Obsidian renders
+//    there (the notes) belong to that window: they are checked with instanceOf.
 
 import { Component, Keymap, MarkdownRenderer, Notice, Platform, Scope, TextFileView } from 'obsidian';
 import { parseNote, serializeNote } from '../../../packages/core/document.js';
 import { DiagramEditor } from '../../../packages/ui/editor.js';
 import { ICON, PLUGIN_NAME, VIEW_CLASS, VIEW_TYPE } from './constants.js';
 
+/** @typedef {import('obsidian').Modifier} Modifier */
+/** @typedef {import('obsidian').TFile} TFile */
+/** @typedef {import('obsidian').WorkspaceLeaf} WorkspaceLeaf */
+/** @typedef {import('./main.js').default} ArchslatePlugin */
+/** @typedef {import('../../../packages/types').DiagramDocument} DiagramDocument */
+/** @typedef {import('../../../packages/types').EditorHost} EditorHost */
+/** @typedef {import('../../../packages/types').Envelope} Envelope */
+
 export class DiagramView extends TextFileView {
-  constructor(leaf, plugin) {
+  constructor(/** @type {WorkspaceLeaf} */ leaf, /** @type {ArchslatePlugin} */ plugin) {
     super(leaf);
     this.plugin = plugin;
+    /**
+     * The editor, from the first setViewData() until the view closes.
+     * @type {DiagramEditor | null}
+     */
     this.editor = null;
+    /**
+     * The note around the diagram, as last read (see parseNote()).
+     * @type {Envelope | null}
+     */
     this.envelope = null;
     this.closed = false;
+    /**
+     * Owns what Obsidian's renderer made of the notes, unloaded when they are rendered again.
+     * @type {Component | null}
+     */
     this.notesComponent = null;
     this.navigation = true;
 
     this.scope = new Scope(this.app.scope);
+    /**
+     * Claims a key for the diagram: it runs `run`, unless there is no editor or the key goes to a text input.
+     * @param {Modifier[]} modifiers
+     * @param {string} key
+     * @param {() => void} run
+     */
     const claim = (modifiers, key, run) =>
       this.scope.register(modifiers, key, (event) => {
         if (!this.editor || this.isTyping(event)) return true;
@@ -58,20 +87,27 @@ export class DiagramView extends TextFileView {
     return ICON;
   }
 
-  async onOpen() {
+  onOpen() {
     this.contentEl.addClass(VIEW_CLASS);
+    this.register(this.contentEl.onWindowMigrated(() => this.editor?.handleResize()));
     this.addAction('file-text', 'Open as Markdown', () => this.plugin.openAsMarkdown(this.leaf));
     if (Platform.isMobile) {
       this.addAction('maximize', 'Fit diagram', () => this.editor?.canvas.fit(true));
       this.addAction('redo-2', 'Redo', () => this.editor?.redo());
       this.addAction('undo-2', 'Undo', () => this.editor?.undo());
     }
+    return Promise.resolve();
+  }
+
+  onResize() {
+    this.editor?.handleResize();
   }
 
   // Text inputs keep their own Mod+Z (the source pane has its own undo too).
-  isTyping(event) {
-    const target = event.target;
-    return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+  isTyping(/** @type {KeyboardEvent} */ event) {
+    const target = event.targetNode;
+    if (!target || !target.instanceOf(HTMLElement)) return false;
+    return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
   }
 
   // ------------------------------------------------------------- the file
@@ -81,7 +117,7 @@ export class DiagramView extends TextFileView {
     return serializeNote(this.editor.document, this.envelope);
   }
 
-  setViewData(data, clear) {
+  setViewData(/** @type {string} */ data, /** @type {boolean} */ clear) {
     this.data = data;
     const { doc, envelope } = parseNote(data);
     this.envelope = envelope;
@@ -104,7 +140,7 @@ export class DiagramView extends TextFileView {
     // setViewData(…, true) follows and replaces the document.
   }
 
-  mountEditor(doc) {
+  mountEditor(/** @type {DiagramDocument} */ doc) {
     this.editor = new DiagramEditor(this.contentEl, this.host());
     this.editor.setDocument(doc);
     this.editor.canvas.stage.setAttribute('data-ignore-swipe', 'true');
@@ -113,14 +149,14 @@ export class DiagramView extends TextFileView {
 
   host() {
     return {
-      load: async () => parseNote(this.data).doc,
+      load: () => Promise.resolve(parseNote(this.data).doc),
       save: () => {
         if (!this.closed) this.requestSave();
       },
-      renderMarkdown: (markdown, element) => this.renderNotes(markdown, element),
-      saveFile: (filename, blob) => this.plugin.saveExport(this, filename, blob),
+      renderMarkdown: (/** @type {string} */ markdown, /** @type {HTMLElement} */ element) => this.renderNotes(markdown, element),
+      saveFile: (/** @type {string} */ filename, /** @type {Blob} */ blob) => this.plugin.saveExport(this, filename, blob),
       fileName: () => this.file?.basename ?? 'diagram',
-      notify: (message) => new Notice(message),
+      notify: (/** @type {string} */ message) => new Notice(message),
       exportsDocument: false,
       appleKeys: Platform.isMacOS || Platform.isIosApp,
     };
@@ -128,7 +164,7 @@ export class DiagramView extends TextFileView {
 
   // The notes below the diagram, through Obsidian's own renderer: links, tags,
   // embeds and callouts work as in any note.
-  renderNotes(markdown, element) {
+  renderNotes(/** @type {string} */ markdown, /** @type {HTMLElement} */ element) {
     if (this.notesComponent) this.removeChild(this.notesComponent);
     this.notesComponent = this.addChild(new Component());
     element.empty();
@@ -137,7 +173,8 @@ export class DiagramView extends TextFileView {
     if (!element.dataset.links) {
       element.dataset.links = 'on';
       this.registerDomEvent(element, 'click', (event) => {
-        const link = event.target instanceof Element ? event.target.closest('a.internal-link') : null;
+        const clicked = event.targetNode;
+        const link = clicked && clicked.instanceOf(Element) ? clicked.closest('a.internal-link') : null;
         if (!link) return;
         event.preventDefault();
         const target = link.getAttribute('data-href') ?? link.getAttribute('href');
@@ -166,7 +203,7 @@ export class DiagramView extends TextFileView {
     await this.save();
   }
 
-  async onUnloadFile(file) {
+  async onUnloadFile(/** @type {TFile} */ file) {
     this.rememberViewState();
     this.editor?.saveNow();
     await super.onUnloadFile(file);

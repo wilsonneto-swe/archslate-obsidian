@@ -536,7 +536,8 @@ function parse(text) {
   }
   const checkEnds = (item) => {
     let valid = true;
-    for (const end of ["from", "to"]) {
+    const ends = ["from", "to"];
+    for (const end of ends) {
       const id = item[end];
       if (model.groupById.has(id)) {
         fail(item.line, item.tokens[end], `"${id}" is a group. Link to a component inside it`);

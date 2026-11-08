@@ -6,9 +6,16 @@ import { el } from './dom.js';
 import { icon } from './icons.js';
 import { renderMarkdown } from './markdown.js';
 
+/** @typedef {import('./editor.js').DiagramEditor} DiagramEditor */
+/** @typedef {import('../types').NotesPanelState} NotesPanelState */
+
 export class NotesPanel {
-  constructor(editor) {
+  constructor(/** @type {DiagramEditor} */ editor) {
     this.editor = editor;
+    /**
+     * What the body shows (read-only flag and markdown), or null before the first render.
+     * @type {string | null}
+     */
     this.rendered = null;
     this.body = el('div', { class: 'sd-notes-body sd-md' });
     this.changed = el('span', { class: 'sd-chip is-changed', text: 'changed', title: 'Different from the version being compared', hidden: true });
@@ -37,7 +44,7 @@ export class NotesPanel {
     );
   }
 
-  update({ markdown, open, changed, readOnly }) {
+  update(/** @type {NotesPanelState} */ { markdown, open, changed, readOnly }) {
     this.root.hidden = !open;
     this.changed.hidden = !changed;
     this.editButton.hidden = readOnly;

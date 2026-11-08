@@ -24,7 +24,7 @@ You need Node.js 22 or later.
 
 ```
 npm install
-npm run check          # Obsidian's lint rules, both builds, the unit tests, a scan for private data
+npm run check          # Obsidian's lint rules (with types), both builds, the unit tests, a scan for private data
 npm run dev            # the web version from the sources: http://localhost:5173/apps/web/
 npm run test:e2e       # the built web page in Chrome, the plugin in the real Obsidian app (macOS; see docs/DEVELOPMENT.md)
 ```

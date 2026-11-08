@@ -10,11 +10,51 @@ import { icon } from './icons.js';
 import { isComposing, modKey, modName } from './keys.js';
 import { DiagramRenderer } from './renderer.js';
 
+/** @typedef {import('../types').AddFormOptions} AddFormOptions */
+/** @typedef {import('./editor.js').DiagramEditor} DiagramEditor */
+/** @typedef {import('../types').CanvasLink} CanvasLink */
+/** @typedef {import('../types').CanvasView} CanvasView */
+/** @typedef {import('../types').ChromeAlign} ChromeAlign */
+/** @typedef {import('../types').EditResult} EditResult */
+/** @typedef {import('../types').Layout} Layout */
+/** @typedef {import('../types').LinkDirection} LinkDirection */
+/** @typedef {import('../types').LinkOp} LinkOp */
+/** @typedef {import('../types').Model} Model */
+/** @typedef {import('../types').NoteItemBox} NoteItemBox */
+/** @typedef {import('../types').Point} Point */
+/** @typedef {import('../types').Rect} Rect */
+/** @typedef {import('../types').Selection} Selection */
+
+/**
+ * A click on a button made by button(): `currentTarget` is that button.
+ * @typedef {PointerEvent & { currentTarget: HTMLButtonElement }} ButtonClick
+ */
+
+/**
+ * button()'s options. `label` is the tooltip and the accessible name;
+ * `pressed` makes it a toggle (aria-pressed), left out when undefined.
+ * @typedef {{ iconName?: string, label: string, onClick: (event: ButtonClick) => void, className?: string, text?: string, pressed?: boolean, disabled?: boolean }} ButtonOptions
+ */
+
+/**
+ * kindGrid()'s options: a radio per kind (and 'group' with `includeGroup`),
+ * `value` checked; `onChange` gets the kind picked.
+ * @typedef {{ name: string, value: string, includeGroup: boolean, onChange: (kind: string) => void }} KindGridOptions
+ */
+
+/**
+ * An event the stage listens to (a pointer, a double click, the wheel). It
+ * comes from the canvas's own elements, so its target is an element.
+ * @template {Event} E
+ * @typedef {E & { target: Element }} StageEvent
+ */
+
 const MIN_ZOOM = 0.15;
 const MAX_ZOOM = 3;
 const MAX_FIT_ZOOM = 1.1;
 const DRAG_THRESHOLD = 4;
 
+/** @returns {Array<[string, string]>} the help popover's rows: keys, and what they do */
 const shortcuts = () => [
   ['Tab / ⇧Tab', 'Add a component after / before the selection'],
   ['Drag a (+)', 'Link to an existing component'],
@@ -37,12 +77,21 @@ const shortcuts = () => [
   ['Esc', 'Cancel, close, deselect'],
 ];
 
+/** @type {Record<LinkOp, string>} */
 const OP_TEXT = { '->': '→ Request', '-->': '⇢ Event', '<->': '⇄ Connection' };
 
+/**
+ * @param {EventTarget | null} target
+ * @returns {boolean}
+ */
 const isTypingTarget = (target) => {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
 };
 
+/**
+ * @param {ButtonOptions} options
+ * @returns {HTMLButtonElement}
+ */
 function button({ iconName, label, onClick, className = '', text, pressed, disabled }) {
   return el(
     'button',
@@ -60,6 +109,10 @@ function button({ iconName, label, onClick, className = '', text, pressed, disab
   );
 }
 
+/**
+ * @param {KindGridOptions} options
+ * @returns {HTMLFieldSetElement}
+ */
 function kindGrid({ name, value, includeGroup, onChange }) {
   const kinds = includeGroup ? [...KIND_NAMES, 'group'] : KIND_NAMES;
   return el(
@@ -77,7 +130,7 @@ function kindGrid({ name, value, includeGroup, onChange }) {
           name,
           value: kind,
           checked: kind === value,
-          onchange: (event) => onChange(event.target.value),
+          onchange: (/** @type {Event & { target: HTMLInputElement }} */ event) => onChange(event.target.value),
         }),
         el('span', { class: 'sd-kind-face' }, icon(kind, 18), el('span', { class: 'sd-kind-name', text: kind })),
       );
@@ -86,13 +139,24 @@ function kindGrid({ name, value, includeGroup, onChange }) {
 }
 
 export class Canvas {
-  constructor(editor) {
+  constructor(/** @type {DiagramEditor} */ editor) {
     this.editor = editor;
     this.renderer = new DiagramRenderer();
+    /** @type {CanvasView} */
     this.view = { k: 1, tx: 0, ty: 0 };
+    /** True while the view follows the diagram (fit), false once the user pans or zooms. */
     this.autoFit = true;
+    /** @type {CanvasLink | null} */
     this.link = null;
+    /**
+     * The open popover; `anchor` is the button that opened it (pressing it again closes it).
+     * @type {{ element: HTMLDivElement, onClose: (() => void) | undefined, anchor: HTMLElement | null } | null}
+     */
     this.popover = null;
+    /**
+     * The toolbars and handles around the selection, each with the [anchor, align] places it may take.
+     * @type {Array<{ element: HTMLElement, options: Array<[() => Point, ChromeAlign]> }>}
+     */
     this.chromeItems = [];
 
     this.chrome = el('div', { class: 'sd-chrome' });
@@ -163,24 +227,31 @@ export class Canvas {
       this.popoverHost,
     );
 
-    this.stage.addEventListener('pointerdown', (e) => this.onPointerDown(e));
+    this.stage.addEventListener('pointerdown', (/** @type {StageEvent<PointerEvent>} */ e) => this.onPointerDown(e));
     this.stage.addEventListener('pointermove', (e) => this.onPointerMove(e));
     this.stage.addEventListener('pointerup', (e) => this.onPointerUp(e));
     this.stage.addEventListener('pointercancel', (e) => {
       this.liftPointer(e);
       this.endDrag();
     });
-    this.stage.addEventListener('dblclick', (e) => this.onDoubleClick(e));
-    this.stage.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
+    this.stage.addEventListener('dblclick', (/** @type {StageEvent<MouseEvent>} */ e) => this.onDoubleClick(e));
+    this.stage.addEventListener('wheel', (/** @type {StageEvent<WheelEvent>} */ e) => this.onWheel(e), { passive: false });
     this.stage.addEventListener('keydown', (e) => this.onKeyDown(e));
     // Touch points down on the canvas, for a pinch.
+    /** @type {Map<number, Point>} */
     this.pointers = new Map();
+    /**
+     * A two-finger pinch: the fingers' first distance and midpoint, and the view then.
+     * @type {{ distance: number, mid: Point, view: CanvasView } | null}
+     */
     this.pinch = null;
   }
 
-  // Called once the canvas is in the page: the observer comes from the window
-  // the canvas lives in (an Obsidian pop-out window has its own).
+  // Called once the canvas is in the page, and again when it has moved to
+  // another window: the observer comes from the window the canvas lives in
+  // (an Obsidian pop-out window has its own).
   attach() {
+    this.resizeObserver?.disconnect();
     this.resizeObserver = new (viewOf(this.stage).ResizeObserver)(() => {
       if (this.autoFit) this.fit(false);
       else this.positionChrome();
@@ -206,7 +277,7 @@ export class Canvas {
 
   // ---------------------------------------------------------------- rendering
 
-  update({ refit = false } = {}) {
+  update(/** @type {{ refit?: boolean }} */ { refit = false } = {}) {
     const { renderModel, layout } = this.editor;
     this.renderer.update(renderModel, layout);
     const empty = renderModel.nodes.length === 0 && renderModel.groups.length === 0;
@@ -228,7 +299,7 @@ export class Canvas {
     this.renderChrome();
   }
 
-  setSelection(selection) {
+  setSelection(/** @type {Selection | null} */ selection) {
     this.renderer.setSelection(selection);
     this.renderChrome();
     this.ensureVisible(selection);
@@ -236,7 +307,7 @@ export class Canvas {
 
   // --------------------------------------------------------------- view math
 
-  setView(view, animate = false) {
+  setView(/** @type {CanvasView} */ view, /** @type {boolean} */ animate = false) {
     this.view = view;
     this.renderer.viewport.classList.toggle('is-animating', animate);
     if (animate) {
@@ -252,18 +323,18 @@ export class Canvas {
     this.positionChrome();
   }
 
-  toScreen(point) {
+  toScreen(/** @type {Point} */ point) {
     const { k, tx, ty } = this.view;
     return { x: point.x * k + tx, y: point.y * k + ty };
   }
 
-  toWorld(clientX, clientY) {
+  toWorld(/** @type {number} */ clientX, /** @type {number} */ clientY) {
     const rect = this.stage.getBoundingClientRect();
     const { k, tx, ty } = this.view;
     return { x: (clientX - rect.left - tx) / k, y: (clientY - rect.top - ty) / k };
   }
 
-  fit(animate) {
+  fit(/** @type {boolean} */ animate) {
     const { bounds } = this.layout;
     const width = this.stage.clientWidth;
     const height = this.stage.clientHeight;
@@ -286,7 +357,7 @@ export class Canvas {
   }
 
   // Frames a part of the diagram (a flow's components), animated.
-  focusRect(rect, animate = true) {
+  focusRect(/** @type {Rect | null} */ rect, /** @type {boolean} */ animate = true) {
     const width = this.stage.clientWidth;
     const height = this.stage.clientHeight;
     if (!width || !height || !rect || rect.w <= 0 || rect.h <= 0) return;
@@ -300,7 +371,7 @@ export class Canvas {
     this.setView({ k, tx, ty }, animate);
   }
 
-  zoomTo(k, center) {
+  zoomTo(/** @type {number} */ k, /** @type {Point | undefined} */ center) {
     const width = this.stage.clientWidth;
     const height = this.stage.clientHeight;
     const pivot = center ?? { x: width / 2, y: height / 2 };
@@ -314,11 +385,11 @@ export class Canvas {
     });
   }
 
-  zoomBy(factor, center) {
+  zoomBy(/** @type {number} */ factor, /** @type {Point | undefined} */ center) {
     this.zoomTo(this.view.k * factor, center);
   }
 
-  ensureVisible(selection) {
+  ensureVisible(/** @type {Selection | null} */ selection) {
     if (!selection || this.autoFit) return;
     const box = selection.type === 'node' ? this.layout.nodes.get(selection.id) : selection.type === 'group' ? this.layout.groups.get(selection.id) : null;
     if (!box) return;
@@ -353,7 +424,7 @@ export class Canvas {
 
   // `fallbacks` are other [anchor, align] pairs to try, in order, when a
   // toolbar would not fit inside the canvas where it prefers to be.
-  place(element, anchor, align, fallbacks = []) {
+  place(/** @type {HTMLElement} */ element, /** @type {() => Point} */ anchor, /** @type {ChromeAlign} */ align, /** @type {Array<[() => Point, ChromeAlign]>} */ fallbacks = []) {
     element.classList.add('sd-anchored');
     this.chrome.append(element);
     this.chromeItems.push({ element, options: [[anchor, align], ...fallbacks] });
@@ -364,13 +435,13 @@ export class Canvas {
     const margin = 8;
     // A toolbar beside its anchor may slide vertically, one above or below it
     // may slide sideways; only the axis that keeps it off the anchor must fit.
-    const fits = (box, align) => {
+    const fits = (/** @type {DOMRect} */ box, /** @type {ChromeAlign} */ align) => {
       return align === 'left' || align === 'right'
         ? box.left >= stage.left + margin && box.right <= stage.right - margin
         : box.top >= stage.top + margin && box.bottom <= stage.bottom - margin;
     };
     for (const { element, options } of this.chromeItems) {
-      const apply = ([anchor, align]) => {
+      const apply = (/** @type {[() => Point, ChromeAlign]} */ [anchor, align]) => {
         for (const name of [...element.classList]) if (name.startsWith('sd-anchor-')) element.classList.remove(name);
         element.classList.add(`sd-anchor-${align}`);
         const point = this.toScreen(anchor());
@@ -396,7 +467,7 @@ export class Canvas {
     if (this.renameState) this.positionRename();
   }
 
-  nodeChrome(id) {
+  nodeChrome(/** @type {string} */ id) {
     const node = this.model.nodeById.get(id);
     const box = this.layout.nodes.get(id);
     if (!node || !box) return;
@@ -431,7 +502,7 @@ export class Canvas {
             class: 'sd-select',
             title: 'Move to group',
             'aria-label': 'Move to group',
-            onchange: (event) => {
+            onchange: (/** @type {Event & { target: HTMLSelectElement }} */ event) => {
               const value = event.target.value || null;
               this.editor.commit(edits.moveNodeToGroup(this.editor.text, id, value));
               this.focus();
@@ -457,7 +528,7 @@ export class Canvas {
     // Above the node when flowing right; beside it when flowing down, where
     // the space above belongs to the upstream component. Never over the node
     // itself, so a double click still reaches it.
-    const at = (fx, fy) => () => {
+    const at = (/** @type {number} */ fx, /** @type {number} */ fy) => () => {
       const b = this.layout.nodes.get(id) ?? box;
       return { x: b.x + b.w * fx, y: b.y + b.h * fy };
     };
@@ -472,7 +543,7 @@ export class Canvas {
     }
   }
 
-  edgeChrome(key) {
+  edgeChrome(/** @type {string} */ key) {
     const edge = this.model.edgeByKey.get(key);
     const geometry = this.layout.edges.get(key);
     if (!edge || !geometry?.points) return;
@@ -539,7 +610,7 @@ export class Canvas {
       propsInput.size = Math.max(7, propsInput.value.length + 1);
     });
 
-    const setOp = (op) => {
+    const setOp = (/** @type {LinkOp} */ op) => {
       if (op !== edge.op) this.editor.commit(edits.setEdgeOp(this.editor.text, key, op));
     };
     const toolbar = el(
@@ -561,6 +632,10 @@ export class Canvas {
       const g = this.layout.edges.get(key) ?? geometry;
       if (g.label) return { x: g.label.x + g.label.w / 2, y: g.label.y };
       const points = g.points;
+      /**
+       * The longest segment so far and its midpoint (none before the first one).
+       * @type {{ length: number, x?: number, y?: number }}
+       */
       let best = { length: -1 };
       for (let i = 1; i < points.length; i += 1) {
         const length = Math.abs(points[i].x - points[i - 1].x) + Math.abs(points[i].y - points[i - 1].y);
@@ -575,7 +650,7 @@ export class Canvas {
     this.place(toolbar, anchor, 'top', [[below, 'bottom']]);
   }
 
-  groupChrome(id) {
+  groupChrome(/** @type {string} */ id) {
     const group = this.model.groupById.get(id);
     const box = this.layout.groups.get(id);
     if (!group || !box) return;
@@ -593,7 +668,7 @@ export class Canvas {
     this.place(toolbar, anchor, 'top-start');
   }
 
-  noteChrome(key) {
+  noteChrome(/** @type {string} */ key) {
     const note = this.model.noteByKey.get(key);
     if (!note || !this.noteBox(key)) return;
     const toolbar = el(
@@ -602,14 +677,14 @@ export class Canvas {
       button({ iconName: 'pencil', text: 'Edit note', label: 'Edit note (Enter)', onClick: () => this.openNoteEditor({ key }) }),
       button({ iconName: 'trash', label: 'Delete note (⌫)', onClick: () => this.deleteSelection(), className: 'sd-danger' }),
     );
-    const anchor = (fy) => () => {
+    const anchor = (/** @type {number} */ fy) => () => {
       const b = this.noteBox(key);
       return b ? { x: b.x + b.w / 2, y: b.y + b.h * fy } : { x: 0, y: 0 };
     };
     this.place(toolbar, anchor(0), 'top', [[anchor(1), 'bottom']]);
   }
 
-  noteBox(key) {
+  noteBox(/** @type {string} */ key) {
     for (const block of this.layout.notes?.values() ?? []) {
       const item = block.items.find((i) => i.key === key);
       if (item) return item;
@@ -619,7 +694,7 @@ export class Canvas {
 
   // ------------------------------------------------------------------ rename
 
-  startRename(selection) {
+  startRename(/** @type {Selection} */ selection) {
     if (this.readOnly) return;
     if (selection.type === 'note') {
       this.openNoteEditor({ key: selection.key });
@@ -631,7 +706,7 @@ export class Canvas {
     this.closePopover();
     const input = el('input', { class: 'sd-rename', value: item.label, 'aria-label': 'Name' });
     let done = false;
-    const finish = (save) => {
+    const finish = (/** @type {boolean} */ save) => {
       if (done) return;
       done = true;
       this.renameState = null;
@@ -681,7 +756,7 @@ export class Canvas {
 
   // ---------------------------------------------------------------- popovers
 
-  openPopover(content, screenPoint, { className = '', onClose, anchor = null } = {}) {
+  openPopover(/** @type {HTMLElement} */ content, /** @type {Point} */ screenPoint, /** @type {{ className?: string, onClose?: () => void, anchor?: HTMLElement | null }} */ { className = '', onClose, anchor = null } = {}) {
     this.closePopover();
     const popover = el('div', { class: `sd-floating sd-popover ${className}`.trim(), role: 'dialog' }, content);
     popover.addEventListener('keydown', (event) => {
@@ -720,20 +795,24 @@ export class Canvas {
   //   link:  { id, dir: 'out' | 'in' }   new node goes after / before `id`
   //   group: group id to add into (defaults to the linked node's group)
   //   kind:  preselected type ('group' allowed when not linking)
-  openAddForm({ link = null, group, kind: presetKind, at } = {}) {
+  openAddForm(/** @type {AddFormOptions} */ { link = null, group, kind: presetKind, at } = {}) {
     if (this.readOnly) return;
     const model = this.model;
     const source = link ? model.nodeById.get(link.id) : null;
     let kind = presetKind ?? this.editor.lastKind ?? 'service';
     if (link && kind === 'group') kind = 'service';
     let opTouched = false;
-    const opFor = (k) => {
+    const opFor = (/** @type {string} */ k) => {
       if (!source || k === 'group') return '->';
       return link.dir === 'out' ? defaultLinkOp(source.kind, k) : defaultLinkOp(k, source.kind);
     };
 
     const nameInput = el('input', { class: 'sd-input', placeholder: 'Name', 'aria-label': 'Name', autocomplete: 'off' });
     const linkLabel = el('input', { class: 'sd-input', placeholder: 'Link label (optional)', 'aria-label': 'Link label' });
+    /**
+     * The link type radios by operator, made only when the new component is linked.
+     * @type {Partial<Record<LinkOp, HTMLInputElement>>}
+     */
     const opInputs = {};
     const opRow = link
       ? el(
@@ -803,6 +882,7 @@ export class Canvas {
       event.preventDefault();
       const name = nameInput.value.trim();
       const groupId = groupSelect ? groupSelect.value || null : null;
+      /** @type {EditResult} */
       let result;
       if (kind === 'group') {
         result = edits.addGroup(this.editor.text, { label: name, parent: groupId });
@@ -843,7 +923,7 @@ export class Canvas {
     nameInput.focus();
   }
 
-  openKindPicker(id) {
+  openKindPicker(/** @type {string} */ id) {
     const node = this.model.nodeById.get(id);
     const box = this.layout.nodes.get(id);
     if (!node || !box || this.readOnly) return;
@@ -874,11 +954,11 @@ export class Canvas {
     });
     const point = this.toScreen({ x: box.x, y: box.y + box.h + 10 });
     const popover = this.openPopover(el('div', { class: 'sd-form' }, el('div', { class: 'sd-form-title', text: 'Type' }), grid), point);
-    popover.querySelector('input:checked')?.focus();
+    /** @type {HTMLInputElement | null} */ (popover.querySelector('input:checked'))?.focus();
   }
 
   // Instances ("x3") and properties ("[Postgres, sharded by user_id]").
-  openDetails(id) {
+  openDetails(/** @type {string} */ id) {
     const node = this.model.nodeById.get(id);
     const box = this.layout.nodes.get(id);
     if (!node || !box || this.readOnly) return;
@@ -923,7 +1003,7 @@ export class Canvas {
   }
 
   // `target` adds a note to that component; `key` edits an existing note.
-  openNoteEditor({ target, key }) {
+  openNoteEditor(/** @type {{ target?: string, key?: string }} */ { target, key }) {
     if (this.readOnly) return;
     const note = key ? this.model.noteByKey.get(key) : null;
     const owner = note?.target ?? target;
@@ -973,12 +1053,12 @@ export class Canvas {
     input.setSelectionRange(input.value.length, input.value.length);
   }
 
-  toggleExport(anchor) {
+  toggleExport(/** @type {HTMLElement} */ anchor) {
     if (this.popover?.element.classList.contains('sd-export')) {
       this.closePopover();
       return;
     }
-    const item = (iconName, title, detail, action) =>
+    const item = (/** @type {string} */ iconName, /** @type {string} */ title, /** @type {string} */ detail, /** @type {() => Promise<void>} */ action) =>
       el(
         'button',
         {
@@ -986,7 +1066,8 @@ export class Canvas {
           class: 'sd-menu-item',
           onclick: () => {
             this.closePopover();
-            action();
+            // Each export reports its own failure.
+            void action();
           },
         },
         icon(iconName, 16),
@@ -1034,7 +1115,7 @@ export class Canvas {
     );
   }
 
-  toggleHelp(anchor = null) {
+  toggleHelp(/** @type {HTMLElement | null} */ anchor = null) {
     if (this.popover?.element.classList.contains('sd-help')) {
       this.closePopover();
       return;
@@ -1052,7 +1133,7 @@ export class Canvas {
 
   // -------------------------------------------------------------------- links
 
-  startLink(anchor, dir, viaDrag = false) {
+  startLink(/** @type {string} */ anchor, /** @type {LinkDirection} */ dir, /** @type {boolean} */ viaDrag = false) {
     if (this.readOnly) return;
     this.closePopover();
     this.link = { anchor, dir, target: null, viaDrag, pointer: null };
@@ -1069,7 +1150,7 @@ export class Canvas {
     this.renderChrome();
   }
 
-  setLinkTarget(id) {
+  setLinkTarget(/** @type {string | null} */ id) {
     if (!this.link) return;
     this.link.target = id && id !== this.link.anchor ? id : null;
     this.renderer.setLinkTarget(this.link.target);
@@ -1102,7 +1183,7 @@ export class Canvas {
     this.focus();
   }
 
-  onHandleDown(event, id, dir) {
+  onHandleDown(/** @type {PointerEvent} */ event, /** @type {string} */ id, /** @type {LinkDirection} */ dir) {
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1113,7 +1194,7 @@ export class Canvas {
     // Tracked on window, not the handle: entering link mode re-renders the
     // chrome, which removes the handle (and any pointer capture it held).
     const win = viewOf(this.stage);
-    const move = (e) => {
+    const move = (/** @type {PointerEvent} */ e) => {
       if (e.pointerId !== pointerId) return;
       if (!dragging && Math.hypot(e.clientX - start.x, e.clientY - start.y) > DRAG_THRESHOLD + 2) {
         dragging = true;
@@ -1121,12 +1202,13 @@ export class Canvas {
       }
       if (dragging && this.link) {
         this.link.pointer = this.toWorld(e.clientX, e.clientY);
+        /** @type {Selection | null} */
         const hit = this.renderer.hit(this.stage.ownerDocument.elementFromPoint(e.clientX, e.clientY));
         this.setLinkTarget(hit?.type === 'node' ? hit.id : null);
         this.updateLinkPreview();
       }
     };
-    const up = (e) => {
+    const up = (/** @type {PointerEvent} */ e) => {
       if (e.pointerId !== pointerId) return;
       win.removeEventListener('pointermove', move);
       win.removeEventListener('pointerup', up);
@@ -1162,9 +1244,10 @@ export class Canvas {
     this.editor.commit({ ...edits.setDirection(this.editor.text, next), select: this.editor.selection }, { refit: true });
   }
 
-  navigate(key) {
+  navigate(/** @type {'ArrowRight' | 'ArrowLeft' | 'ArrowDown' | 'ArrowUp'} */ key) {
     const nodes = [...this.layout.nodes.values()].filter((n) => this.model.nodeById.has(n.id));
     if (nodes.length === 0) return;
+    /** @type {Selection | null} */
     const sel = this.link ? { type: 'node', id: this.link.target ?? this.link.anchor } : this.editor.selection;
     const current = sel?.type === 'node' ? this.layout.nodes.get(sel.id) : null;
     if (!current) {
@@ -1176,6 +1259,7 @@ export class Canvas {
     const [dx, dy] = { ArrowRight: [1, 0], ArrowLeft: [-1, 0], ArrowDown: [0, 1], ArrowUp: [0, -1] }[key];
     const cx = current.x + current.w / 2;
     const cy = current.y + current.h / 2;
+    /** @type {{ id: string, score: number } | null} */
     let best = null;
     for (const node of nodes) {
       if (node.id === current.id) continue;
@@ -1194,7 +1278,7 @@ export class Canvas {
 
   // ------------------------------------------------------------------ events
 
-  onPointerDown(event) {
+  onPointerDown(/** @type {StageEvent<PointerEvent>} */ event) {
     const popover = this.popover;
     if (popover && !popover.element.contains(event.target) && !popover.anchor?.contains(event.target)) this.closePopover();
     if (event.target.closest?.('.sd-floating, .sd-handle, .sd-rename, .sd-empty-add')) return;
@@ -1207,6 +1291,7 @@ export class Canvas {
       }
     }
     // What was pressed, before focusing ends a rename and redraws the canvas.
+    /** @type {Selection | null} */
     const hit = this.renderer.hit(event.target);
     this.focus();
     this.drag = {
@@ -1243,7 +1328,7 @@ export class Canvas {
     this.setView({ k, tx: now.x - world.x * k, ty: now.y - world.y * k });
   }
 
-  liftPointer(event) {
+  liftPointer(/** @type {PointerEvent} */ event) {
     if (!this.pointers.delete(event.pointerId)) return;
     if (this.pinch && this.pointers.size < 2) {
       this.pinch = null;
@@ -1251,7 +1336,7 @@ export class Canvas {
     }
   }
 
-  onPointerMove(event) {
+  onPointerMove(/** @type {PointerEvent} */ event) {
     if (this.pointers.has(event.pointerId)) {
       this.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (this.pinch && this.pointers.size >= 2) {
@@ -1261,6 +1346,7 @@ export class Canvas {
     }
     if (this.link && !this.link.viaDrag) {
       this.link.pointer = this.toWorld(event.clientX, event.clientY);
+      /** @type {Selection | null} */
       const hit = this.renderer.hit(event.target);
       this.setLinkTarget(hit?.type === 'node' ? hit.id : null);
     }
@@ -1278,7 +1364,7 @@ export class Canvas {
     this.setView({ k: drag.view.k, tx: drag.view.tx + dx, ty: drag.view.ty + dy });
   }
 
-  onPointerUp(event) {
+  onPointerUp(/** @type {PointerEvent} */ event) {
     this.liftPointer(event);
     const drag = this.drag;
     this.endDrag();
@@ -1301,8 +1387,9 @@ export class Canvas {
     this.stage.classList.remove('is-panning');
   }
 
-  onDoubleClick(event) {
+  onDoubleClick(/** @type {StageEvent<MouseEvent>} */ event) {
     if (this.readOnly || event.target.closest?.('.sd-floating, .sd-handle, .sd-rename')) return;
+    /** @type {Selection | null} */
     const hit = this.renderer.hit(event.target);
     if (hit?.type === 'node' || hit?.type === 'group' || hit?.type === 'note') {
       this.editor.select(hit);
@@ -1316,7 +1403,7 @@ export class Canvas {
     }
   }
 
-  onWheel(event) {
+  onWheel(/** @type {StageEvent<WheelEvent>} */ event) {
     // A popover that scrolls keeps its wheel.
     if (event.target.closest?.('.sd-popover')) return;
     event.preventDefault();
@@ -1331,7 +1418,7 @@ export class Canvas {
     }
   }
 
-  onKeyDown(event) {
+  onKeyDown(/** @type {KeyboardEvent} */ event) {
     if (isComposing(event) || isTypingTarget(event.target)) return;
     const target = event.target instanceof Element && event.target !== this.stage ? event.target : null;
     // Forms and menus keep their keys (Escape still closes them), and a focused

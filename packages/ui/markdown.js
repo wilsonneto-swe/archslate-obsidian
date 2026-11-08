@@ -8,6 +8,18 @@
 
 import { el } from './dom.js';
 
+/**
+ * A list item as its list is read: its text (lazy continuation lines joined
+ * with "\n") and the lines indented under it, rendered as nested blocks.
+ * @typedef {{ text: string, sub: string[] }} ListItem
+ */
+
+/**
+ * A block read from the lines: its element, and the index of the line after it.
+ * @template {HTMLElement} E
+ * @typedef {{ node: E, next: number }} ParsedBlock
+ */
+
 const LIST = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
 const FENCE = /^\s*(```+|~~~+)\s*([\w+-]*)/;
 // A heading's closing #s are trimmed by headingText(), not by the pattern: a
@@ -21,14 +33,31 @@ const TABLE_RULE = /^\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?$/;
 const MAX_DEPTH = 40;
 const SAFE_URL = /^(https?:|mailto:)/i;
 
+/**
+ * @param {string} line
+ * @returns {number} the width of the line's leading whitespace, a tab counting as four
+ */
 const indentOf = (line) => line.match(/^\s*/)[0].replace(/\t/g, '    ').length;
+/**
+ * @param {string} line
+ * @returns {boolean}
+ */
 const isBlank = (line) => line.trim() === '';
 
+/**
+ * @param {string[]} lines
+ * @param {number} i
+ * @returns {boolean}
+ */
 function isTableStart(lines, i) {
   return lines[i].includes('|') && i + 1 < lines.length && lines[i + 1].includes('-') && TABLE_RULE.test(lines[i + 1].trim());
 }
 
 // "## Title ##" -> "Title"; a # that is part of the text ("C#") stays.
+/**
+ * @param {string} [rest] the text after the heading's opening #s (undefined for a bare "##")
+ * @returns {string}
+ */
 function headingText(rest = '') {
   let end = rest.length;
   while (end > 0 && /\s/.test(rest[end - 1])) end -= 1;
@@ -38,15 +67,25 @@ function headingText(rest = '') {
   return rest.slice(0, end).trim();
 }
 
+/**
+ * @param {string[]} lines
+ * @param {number} i
+ * @returns {boolean} whether line i starts a block other than a paragraph
+ */
 function startsBlock(lines, i) {
   const line = lines[i];
   return FENCE.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line) || LIST.test(line) || isTableStart(lines, i);
 }
 
+/**
+ * @param {string} line a table row
+ * @returns {string[]} its cells, trimmed ("\|" is a | inside a cell)
+ */
 function splitRow(line) {
   let row = line.trim();
   if (row.startsWith('|')) row = row.slice(1);
   if (row.endsWith('|') && !row.endsWith('\\|')) row = row.slice(0, -1);
+  /** @type {string[]} */
   const cells = [];
   let current = '';
   for (let i = 0; i < row.length; i += 1) {
@@ -68,24 +107,50 @@ function splitRow(line) {
 
 // A link's text never holds another link (that is also what keeps a bare URL,
 // whose text is the URL itself, from being linked again and again).
+/**
+ * @param {string} text
+ * @param {string} href
+ * @param {{ plain?: boolean }} [options] plain: the text as is, without inline markdown
+ * @returns {HTMLAnchorElement | HTMLSpanElement} a span when the URL isn't http(s) or mailto
+ */
 function link(text, href, { plain = false } = {}) {
   const body = plain ? text : inline(text, { links: false });
   if (!SAFE_URL.test(href)) return el('span', {}, body);
   return el('a', { href, target: '_blank', rel: 'noopener noreferrer' }, body);
 }
 
+/**
+ * Inline markdown as text and elements, to append to a block.
+ * @param {string} text
+ * @param {{ links?: boolean }} [options] links: false inside a link's own text
+ * @returns {Array<string | HTMLElement>}
+ */
 export function inline(text, { links = true } = {}) {
+  /** @type {Array<string | HTMLElement>} */
   const out = [];
   let buffer = '';
+  /** @returns {void} */
   const flush = () => {
     if (buffer) out.push(buffer);
     buffer = '';
   };
+  /**
+   * @param {HTMLElement} node
+   * @param {number} next the index to go on from
+   * @returns {number} next
+   */
   const emit = (node, next) => {
     flush();
     out.push(node);
     return next;
   };
+  /**
+   * The text from `i` to the next `marker`, as a `tag` element.
+   * @param {number} i the index of the opening marker
+   * @param {string} marker
+   * @param {'strong' | 'del' | 'mark' | 'em'} tag
+   * @returns {number} the index after the closing marker, or -1 (none, or space just inside the markers)
+   */
   const wrapped = (i, marker, tag) => {
     const close = text.indexOf(marker, i + marker.length + 1);
     if (close < 0) return -1;
@@ -147,6 +212,10 @@ export function inline(text, { links = true } = {}) {
 
 // ------------------------------------------------------------------ blocks
 
+/**
+ * @param {string} text the item's text; "[ ] …" or "[x] …" makes it a task
+ * @returns {HTMLLIElement}
+ */
 function listItem(text) {
   const task = text.match(/^\[([ xX])\]\s+(.*)$/s);
   if (!task) return el('li', {}, inline(text));
@@ -160,9 +229,16 @@ function listItem(text) {
   );
 }
 
+/**
+ * @param {string[]} lines
+ * @param {number} start the index of the list's first item
+ * @param {number} depth how deep the list is nested in quotes and lists
+ * @returns {ParsedBlock<HTMLOListElement | HTMLUListElement>}
+ */
 function parseList(lines, start, depth) {
   const base = indentOf(lines[start]);
   const ordered = /\d/.test(lines[start].match(LIST)[2]);
+  /** @type {ListItem[]} */
   const items = [];
   let i = start;
   while (i < lines.length) {
@@ -204,6 +280,11 @@ function parseList(lines, start, depth) {
   return { node: list, next: i };
 }
 
+/**
+ * @param {string[]} lines
+ * @param {number} start the index of the header row (the delimiter row follows it)
+ * @returns {ParsedBlock<HTMLDivElement>}
+ */
 function parseTable(lines, start) {
   const header = splitRow(lines[start]);
   const align = splitRow(lines[start + 1]).map((cell) => {
@@ -211,7 +292,14 @@ function parseTable(lines, start) {
     const right = cell.endsWith(':');
     return left && right ? 'center' : right ? 'right' : left ? 'left' : null;
   });
+  /**
+   * @param {'th' | 'td'} tag
+   * @param {string} text
+   * @param {number} index the column
+   * @returns {HTMLTableCellElement}
+   */
   const cell = (tag, text, index) => el(tag, { style: align[index] ? { textAlign: align[index] } : null }, inline(text));
+  /** @type {HTMLTableRowElement[]} */
   const body = [];
   let i = start + 2;
   while (i < lines.length && !isBlank(lines[i]) && lines[i].includes('|')) {
@@ -228,6 +316,11 @@ function parseTable(lines, start) {
   return { node: el('div', { class: 'sd-md-table' }, table), next: i };
 }
 
+/**
+ * @param {string[]} lines
+ * @param {number} [depth] how deep these lines are nested in quotes and lists
+ * @returns {DocumentFragment}
+ */
 function renderBlocks(lines, depth = 0) {
   const fragment = document.createDocumentFragment();
   if (depth > MAX_DEPTH) {
@@ -244,6 +337,7 @@ function renderBlocks(lines, depth = 0) {
 
     const fence = line.match(FENCE);
     if (fence) {
+      /** @type {string[]} */
       const body = [];
       i += 1;
       while (i < lines.length && !lines[i].trim().startsWith(fence[1])) body.push(lines[i++]);
@@ -266,6 +360,7 @@ function renderBlocks(lines, depth = 0) {
     }
 
     if (QUOTE.test(line)) {
+      /** @type {string[]} */
       const body = [];
       while (i < lines.length && QUOTE.test(lines[i])) body.push(lines[i++].replace(QUOTE, ''));
       fragment.append(el('blockquote', {}, renderBlocks(body, depth + 1)));
@@ -294,6 +389,10 @@ function renderBlocks(lines, depth = 0) {
   return fragment;
 }
 
+/**
+ * @param {string} text
+ * @returns {DocumentFragment}
+ */
 export function renderMarkdown(text) {
   return renderBlocks(text.replace(/\r/g, '').split('\n'));
 }

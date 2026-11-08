@@ -5,6 +5,15 @@
 
 import { el, viewOf } from './dom.js';
 
+/** @typedef {import('../types').SvgImage} SvgImage */
+
+/**
+ * A node of the drawn diagram, told apart by its nodeType as markup() does: an
+ * element (1; HTML and SVG elements have an inline style, a plain Element has
+ * none), text (3), or anything else, such as a comment (8), which is left out.
+ * @typedef {(Element & { style?: CSSStyleDeclaration }) | (Text & { nodeType: 3 }) | (Comment & { nodeType: 8 })} DrawnNode
+ */
+
 const STYLE_PROPS = [
   'fill',
   'fill-opacity',
@@ -30,6 +39,10 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // "translate(12px, 30px)" (CSS) -> "translate(12 30)" (SVG attribute), so the
 // file also renders in tools that ignore CSS transforms.
+/**
+ * @param {string} value a CSS transform
+ * @returns {string | null} its translate in px, as an SVG transform; null when it has none
+ */
 function cssTranslate(value) {
   const m = value.match(/translate\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px\s*\)/);
   return m ? `translate(${m[1]} ${m[2]})` : null;
@@ -37,6 +50,10 @@ function cssTranslate(value) {
 
 // Characters XML does not allow (control characters, half of an emoji's
 // surrogate pair) would make the file unreadable: they are dropped.
+/**
+ * @param {string} text
+ * @returns {string}
+ */
 function xmlChars(text) {
   let out = '';
   for (let i = 0; i < text.length; i += 1) {
@@ -53,7 +70,17 @@ function xmlChars(text) {
   }
   return out;
 }
+/**
+ * Text as XML character data.
+ * @param {string} text
+ * @returns {string}
+ */
 const escapeText = (text) => xmlChars(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+/**
+ * Text as a double-quoted XML attribute value.
+ * @param {string} text
+ * @returns {string}
+ */
 const escapeAttr = (text) => escapeText(text).replace(/"/g, '&quot;');
 
 // Attributes that only matter on screen (hit testing, selection, source lines).
@@ -62,12 +89,20 @@ const SKIP_ATTRIBUTE = /^(class|style|data-.*|role|aria-.*|tabindex)$/;
 // Writes the SVG markup of a drawn element with its computed style inline. It
 // is built as text rather than by cloning and restyling nodes, so a strict
 // Content-Security-Policy (no inline styles) has nothing to object to.
+/**
+ * @param {DrawnNode} element
+ * @returns {string}
+ */
 function markup(element) {
   if (element.nodeType === 3) return escapeText(element.nodeValue);
   if (element.nodeType !== 1) return '';
   const tag = element.localName;
   if (tag === 'title') return '';
   if (element.matches('.sd-edge-hit')) return '';
+  /**
+   * The attributes to write, each as `name="value"`.
+   * @type {string[]}
+   */
   const attributes = [];
   for (const { name, value } of element.attributes) {
     if (!SKIP_ATTRIBUTE.test(name) && name !== 'transform') attributes.push(`${name}="${escapeAttr(value)}"`);
@@ -85,6 +120,13 @@ function markup(element) {
 }
 
 // Builds a self-contained SVG string of everything currently drawn.
+/**
+ * @param {import('./renderer.js').DiagramRenderer} renderer
+ * @param {import('../types').Layout} layout
+ * @param {string} background a CSS colour
+ * @param {number} [padding]
+ * @returns {SvgImage}
+ */
 export function diagramSvg(renderer, layout, background, padding = 28) {
   const { bounds } = layout;
   const x = bounds.x - padding;
@@ -99,6 +141,11 @@ export function diagramSvg(renderer, layout, background, padding = 28) {
   return { text, width: w, height: h };
 }
 
+/**
+ * @param {SvgImage} svg
+ * @param {number} [scale]
+ * @returns {Promise<Blob>}
+ */
 export function svgToPng(svg, scale = 2) {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -116,6 +163,13 @@ export function svgToPng(svg, scale = 2) {
   });
 }
 
+// The web page's way to save a file (in Obsidian, host.saveFile writes exports
+// to the vault instead).
+/**
+ * @param {Blob} blob
+ * @param {string} filename
+ * @returns {void}
+ */
 export function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = el('a', { href: url, download: filename, style: { display: 'none' } });
@@ -126,6 +180,11 @@ export function downloadBlob(blob, filename) {
 }
 
 // "# Orders platform, v3: outbox" -> "orders-platform".
+/**
+ * @param {string} text
+ * @param {string} [fallback]
+ * @returns {string}
+ */
 export function fileBaseName(text, fallback = 'diagram') {
   const first = text.split('\n').find((line) => line.trim() !== '');
   const title = first?.match(/^\s*(?:#|\/\/)\s*(.+)$/)?.[1].split(/[,:;(]/)[0] ?? '';

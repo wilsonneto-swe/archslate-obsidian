@@ -6,7 +6,7 @@
 // The editor is host-agnostic. A host only has to load and save a document:
 //
 //   host.load(): Promise<{ text: string, snapshots: Snapshot[] }>
-//   host.save(doc): void | Promise<void>
+//   host.save(doc): void   (called without waiting: an async write handles its own errors)
 //   Snapshot = { id, name, text, createdAt }
 //
 // Optional host hooks:
@@ -18,8 +18,9 @@
 //   host.exportsDocument                     false where the note already is the file (Obsidian)
 //   host.appleKeys                           true to label shortcuts ⌘S rather than Ctrl+S
 //
-// The web shell backs this with localStorage; the Obsidian shell will back it
-// with a vault file.
+// The web shell backs this with localStorage, the Obsidian shell with a vault
+// file. An Obsidian view can move into a pop-out window and back with its
+// editor; the host calls handleResize() then, and the editor follows.
 
 import { parse, flowAtLine, slugify } from '../core/parser.js';
 import { unionModel, isEmptySummary } from '../core/diff.js';
@@ -37,6 +38,19 @@ import { useAppleKeys } from './keys.js';
 import { NotesPanel } from './notes-panel.js';
 import { Timeline, formatDate } from './timeline.js';
 
+/** @typedef {import('../types').ChangeSource} ChangeSource */
+/** @typedef {import('../types').DiagramDocument} DiagramDocument */
+/** @typedef {import('../types').DiffCounts} DiffCounts */
+/** @typedef {import('../types').DiffSummary} DiffSummary */
+/** @typedef {import('../types').EditorHost} EditorHost */
+/** @typedef {import('../types').FlowSource} FlowSource */
+/** @typedef {import('../types').HistoryEntry} HistoryEntry */
+/** @typedef {import('../types').RenderModel} RenderModel */
+/** @typedef {import('../types').Selection} Selection */
+/** @typedef {import('../types').Snapshot} Snapshot */
+/** @typedef {import('../types').TextChange} TextChange */
+/** @typedef {import('../types').ViewState} ViewState */
+
 const SAVE_DELAY = 400;
 // A diagram whose layout takes longer than this (well over a hundred
 // components) is redrawn when typing pauses, not on every keystroke.
@@ -46,17 +60,22 @@ const NOTES_MIN_WIDTH = 1080;
 
 class History {
   constructor() {
+    /**
+     * The undo steps, oldest first.
+     * @type {HistoryEntry[]}
+     */
     this.entries = [];
+    /** The current step: entries[index] holds the text now. */
     this.index = -1;
   }
 
-  reset(text) {
+  reset(/** @type {string} */ text) {
     this.entries = [{ text, selection: null, key: null, time: 0 }];
     this.index = 0;
   }
 
   // Consecutive typing within a short window collapses into one undo step.
-  record(text, selection, key) {
+  record(/** @type {string} */ text, /** @type {Selection | null} */ selection, /** @type {string | null} */ key) {
     const now = Date.now();
     const top = this.entries[this.index];
     if (key && top?.key === key && now - top.time < 1000) {
@@ -91,22 +110,65 @@ class History {
   }
 }
 
+/**
+ * A new version's id: a UUID where the browser has them.
+ * @returns {string}
+ */
 const newId = () => window.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
+/**
+ * Whether two selections pick the same item (no selection equals no selection).
+ * @param {Selection | null | undefined} a
+ * @param {Selection | null | undefined} b
+ * @returns {boolean}
+ */
 const sameSelection = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
+/**
+ * What went wrong, for a message: an error's message (from any window), or a thrown string.
+ * @param {unknown} error
+ * @returns {string}
+ */
+const errorText = (error) => {
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
+  return 'unknown error';
+};
+
 export class DiagramEditor {
-  constructor(container, host) {
+  constructor(/** @type {HTMLElement} */ container, /** @type {EditorHost} */ host) {
     this.host = host;
+    /** The source text: the one piece of state everything on screen comes from. */
     this.text = '';
+    /** @type {Snapshot[]} */
     this.snapshots = [];
+    /**
+     * The version on screen: 'now' (the text, editable) or a snapshot's id (read-only).
+     * @type {string}
+     */
     this.version = 'now';
+    /** Whether the changes view is on. */
     this.changes = false;
+    /**
+     * The snapshot the user picked to compare against, instead of the previous version.
+     * @type {string | null}
+     */
     this.baseOverride = null;
+    /** @type {Selection | null} */
     this.selection = null;
+    /** The type the last component added had: the add form preselects it. */
     this.lastKind = 'service';
+    /**
+     * The id of the flow being walked through.
+     * @type {string | null}
+     */
     this.activeFlow = null;
+    /** @type {FlowSource | null} */
     this.flowSource = null;
+    /**
+     * Whether the user opened (true) or closed (false) the notes panel; null: decided by the room.
+     * @type {boolean | null}
+     */
     this.notesPreference = null;
     this.history = new History();
     useAppleKeys(host.appleKeys);
@@ -145,30 +207,62 @@ export class DiagramEditor {
     this.host_ = el('div', { class: 'sd-editor-host' }, this.root);
     container.append(this.host_);
     this.measure = createMeasurer(this.root);
-    // The window the editor lives in: an Obsidian pop-out window has its own
-    // frames, observers and timers.
-    this.win = viewOf(this.root);
-    this.canvas.attach();
 
     this.root.addEventListener('keydown', (event) => this.onKeyDown(event));
-    // The notes panel follows the room available while the user has not chosen.
-    let lastOpen = null;
-    this.resizeObserver = new this.win.ResizeObserver(() => {
-      if (!this.model || this.notesPreference !== null) return;
-      if (this.notesOpen !== lastOpen) {
-        lastOpen = this.notesOpen;
-        this.updateNotes();
-        this.canvas.update();
-      }
-    });
-    this.resizeObserver.observe(this.root);
     this.splitter.addEventListener('pointerdown', (event) => this.onSplitterDown(event));
+    /**
+     * Whether the notes panel was open when the room last changed.
+     * @type {boolean | null}
+     */
+    this.notesWereOpen = null;
     // Leaving the page writes a change still waiting for its save, and only
     // then: a tab left open must not write over what another tab stored since.
     this.flush = () => {
       if (this.saveTimer) this.saveNow();
     };
-    this.win.addEventListener('pagehide', this.flush);
+    /**
+     * The window the observers and the pagehide listener belong to.
+     * @type {(Window & typeof globalThis) | null}
+     */
+    this.watched = null;
+    /** @type {ResizeObserver | null} */
+    this.resizeObserver = null;
+    this.watchWindow();
+  }
+
+  // Observers, frames and the pagehide event come from the window the editor
+  // is in, and an Obsidian view can move into a pop-out window (and back)
+  // with its editor. Timers stay with the main window: they outlive a pop-out
+  // that closes. Returns whether the window changed.
+  watchWindow() {
+    const win = viewOf(this.root);
+    if (win === this.watched) return false;
+    this.resizeObserver?.disconnect();
+    this.watched?.removeEventListener('pagehide', this.flush);
+    this.watched = win;
+    this.resizeObserver = new win.ResizeObserver(() => this.roomChanged());
+    this.resizeObserver.observe(this.root);
+    win.addEventListener('pagehide', this.flush);
+    this.canvas.attach();
+    return true;
+  }
+
+  // The notes panel follows the room available while the user has not chosen.
+  roomChanged() {
+    if (!this.model || this.notesPreference !== null) return;
+    if (this.notesOpen !== this.notesWereOpen) {
+      this.notesWereOpen = this.notesOpen;
+      this.updateNotes();
+      this.canvas.update();
+    }
+  }
+
+  // The host's word that the editor was resized or moved: Obsidian calls it
+  // from the view's onResize, also after moving the view to another window.
+  // There the editor observes from the new window and draws again at once (a
+  // frame asked of the old window may not come while it is in the background).
+  handleResize() {
+    if (this.watchWindow() && this.layout) this.renderCanvas(false);
   }
 
   async init() {
@@ -176,7 +270,7 @@ export class DiagramEditor {
     this.setDocument(doc);
   }
 
-  setDocument(doc) {
+  setDocument(/** @type {DiagramDocument} */ doc) {
     // Forms and modes belong to the document that was open.
     this.canvas.closePopover();
     this.canvas.cancelRename();
@@ -200,34 +294,38 @@ export class DiagramEditor {
   }
 
   // Replaces the document (an opened file, say) and stores it right away.
-  openDocument(doc) {
+  openDocument(/** @type {DiagramDocument} */ doc) {
     this.setDocument(doc);
     this.saveNow();
   }
 
-  notify(message, { error = false } = {}) {
+  notify(/** @type {string} */ message, /** @type {{ error?: boolean }} */ { error = false } = {}) {
     if (this.host.notify) {
       this.host.notify(message, { error });
       return;
     }
-    this.win.clearTimeout(this.toastTimer);
+    window.clearTimeout(this.toastTimer);
     this.toast.textContent = message;
     this.toast.classList.toggle('is-error', error);
     this.toast.hidden = false;
-    this.toastTimer = this.win.setTimeout(() => {
+    /**
+     * The timer that hides the toast.
+     * @type {number | undefined}
+     */
+    this.toastTimer = window.setTimeout(() => {
       this.toast.hidden = true;
     }, error ? 6000 : 3200);
   }
 
   // `save: false` when the host has already written the document (or must not).
-  destroy({ save = true } = {}) {
+  destroy(/** @type {{ save?: boolean }} */ { save = true } = {}) {
     if (save) this.saveNow();
-    this.win.clearTimeout(this.saveTimer);
-    this.win.clearTimeout(this.toastTimer);
-    if (this.frame) this.win.cancelAnimationFrame(this.frame);
-    this.win.clearTimeout(this.layoutTimer);
-    this.win.removeEventListener('pagehide', this.flush);
-    this.resizeObserver.disconnect();
+    window.clearTimeout(this.saveTimer);
+    window.clearTimeout(this.toastTimer);
+    if (this.frame) this.frameWindow?.cancelAnimationFrame(this.frame);
+    window.clearTimeout(this.layoutTimer);
+    this.watched?.removeEventListener('pagehide', this.flush);
+    this.resizeObserver?.disconnect();
     this.canvas.destroy();
     this.host_.remove();
   }
@@ -238,7 +336,7 @@ export class DiagramEditor {
     return this.version !== 'now';
   }
 
-  snapshot(id) {
+  snapshot(/** @type {string} */ id) {
     return this.snapshots.find((s) => s.id === id) ?? null;
   }
 
@@ -255,7 +353,7 @@ export class DiagramEditor {
     return index > 0 ? this.snapshots[index - 1] : null;
   }
 
-  commit(result, { source = 'canvas', refit = false } = {}) {
+  commit(/** @type {TextChange} */ result, /** @type {{ source?: ChangeSource, refit?: boolean }} */ { source = 'canvas', refit = false } = {}) {
     if (this.readOnly) return;
     const { text, select } = result;
     if (text === this.text) {
@@ -286,14 +384,14 @@ export class DiagramEditor {
     if (entry) this.restoreEntry(entry);
   }
 
-  restoreEntry(entry) {
+  restoreEntry(/** @type {HistoryEntry} */ entry) {
     this.text = entry.text;
     this.selection = entry.selection;
     this.refresh();
     this.scheduleSave();
   }
 
-  select(selection, { source = 'canvas' } = {}) {
+  select(/** @type {Selection | null} */ selection, /** @type {{ source?: ChangeSource }} */ { source = 'canvas' } = {}) {
     const next = selection ?? null;
     if (sameSelection(next, this.selection)) return;
     this.selection = next;
@@ -302,7 +400,7 @@ export class DiagramEditor {
     if (source !== 'code' && next) this.code.revealLine(this.lineOf(next));
   }
 
-  lineOf(selection) {
+  lineOf(/** @type {Selection | null} */ selection) {
     if (!selection || !this.model) return -1;
     if (selection.type === 'node') return this.model.nodeById.get(selection.id)?.line ?? -1;
     if (selection.type === 'edge') return this.model.edgeByKey.get(selection.key)?.line ?? -1;
@@ -325,13 +423,22 @@ export class DiagramEditor {
 
   // --------------------------------------------------------------- rendering
 
-  refresh({ source = 'canvas', refit = false } = {}) {
+  refresh(/** @type {{ source?: ChangeSource, refit?: boolean }} */ { source = 'canvas', refit = false } = {}) {
+    /** The parsed text on screen. */
     this.model = parse(this.activeText);
     if (this.activeFlow && !this.model.flowById.has(this.activeFlow)) this.activeFlow = null;
     const base = this.baseSnapshot();
     if (base) {
       const union = unionModel(parse(base.text), this.model);
+      /**
+       * What the canvas draws: the model, or the changes against a version, or a flow.
+       * @type {RenderModel}
+       */
       this.renderModel = union;
+      /**
+       * What changed, while the changes view is on.
+       * @type {DiffSummary | null}
+       */
       this.summary = union.summary;
     } else {
       this.renderModel = (this.activeFlow && flowView(this.model, this.activeFlow)) || this.model;
@@ -354,29 +461,42 @@ export class DiagramEditor {
         this.pendingRefit = false;
       };
       if (this.layoutMs > SLOW_LAYOUT_MS) {
-        this.win.clearTimeout(this.layoutTimer);
-        this.layoutTimer = this.win.setTimeout(draw, Math.min(800, 150 + this.layoutMs));
+        window.clearTimeout(this.layoutTimer);
+        /**
+         * The redraw waiting for typing to pause, or null.
+         * @type {number | null}
+         */
+        this.layoutTimer = window.setTimeout(draw, Math.min(800, 150 + this.layoutMs));
       } else if (!this.frame) {
-        this.frame = this.win.requestAnimationFrame(draw);
+        /**
+         * The window the frame was asked of: the editor can move to another.
+         * @type {(Window & typeof globalThis) | null}
+         */
+        this.frameWindow = viewOf(this.root);
+        /**
+         * The redraw waiting for the next animation frame, or null.
+         * @type {number | null}
+         */
+        this.frame = this.frameWindow.requestAnimationFrame(draw);
       }
     } else {
       this.renderCanvas(refit);
     }
   }
 
-  renderCanvas(refit) {
+  renderCanvas(/** @type {boolean} */ refit) {
     if (this.frame) {
-      this.win.cancelAnimationFrame(this.frame);
+      this.frameWindow?.cancelAnimationFrame(this.frame);
       this.frame = null;
     }
     if (this.layoutTimer) {
-      this.win.clearTimeout(this.layoutTimer);
+      window.clearTimeout(this.layoutTimer);
       this.layoutTimer = null;
     }
     this.updateNotes();
-    const started = this.win.performance.now();
+    const started = performance.now();
     this.layout = layoutDiagram(this.renderModel, { measureText: this.measure });
-    this.layoutMs = this.win.performance.now() - started;
+    this.layoutMs = performance.now() - started;
     this.canvas.renderer.selection = this.selection;
     this.canvas.update({ refit });
     const focus = this.pendingFocus;
@@ -386,8 +506,9 @@ export class DiagramEditor {
   }
 
   updateCode() {
+    /** @type {Map<number, string>} */
     const marks = new Map();
-    const mark = (line, cls) => {
+    const mark = (/** @type {number | undefined} */ line, /** @type {string} */ cls) => {
       if (Number.isInteger(line)) marks.set(line, `${marks.get(line) ?? ''} ${cls}`.trim());
     };
     if (this.summary) {
@@ -414,6 +535,7 @@ export class DiagramEditor {
   }
 
   updateStatusBar() {
+    /** @type {HTMLElement[]} */
     const parts = [];
     const viewing = this.readOnly ? this.snapshot(this.version) : null;
     if (viewing) {
@@ -440,13 +562,14 @@ export class DiagramEditor {
           {
             class: 'sd-select',
             'aria-label': 'Compare against',
-            onchange: (event) => this.setBase(event.target.value),
+            onchange: (/** @type {Event & { target: HTMLSelectElement }} */ event) => this.setBase(event.target.value),
           },
           this.snapshots
             .filter((s) => s.id !== this.version)
             .map((s) => el('option', { value: s.id, text: s.name, selected: s.id === base.id })),
         );
-        const counts = (label, bucket) => {
+        const counts = (/** @type {string} */ label, /** @type {DiffCounts} */ bucket) => {
+          /** @type {HTMLSpanElement[]} */
           const chips = [];
           if (bucket.added) chips.push(el('span', { class: 'sd-chip is-added', text: `+${bucket.added}` }));
           if (bucket.removed) chips.push(el('span', { class: 'sd-chip is-removed', text: `−${bucket.removed}` }));
@@ -506,7 +629,7 @@ export class DiagramEditor {
 
   // ------------------------------------------------------------- flows, notes
 
-  setFlow(id, source = 'user') {
+  setFlow(/** @type {string | null} */ id, /** @type {FlowSource} */ source = 'user') {
     const next = id && this.model.flowById.has(id) ? id : null;
     if (next === this.activeFlow) {
       this.flowSource = next ? source : null;
@@ -520,6 +643,7 @@ export class DiagramEditor {
       this.baseOverride = null;
     }
     // The camera follows the walkthrough, and goes back to the whole diagram after it.
+    /** @type {'flow' | 'all' | null} */
     this.pendingFocus = next ? 'flow' : wasFlow && !this.canvas.autoFit ? 'all' : null;
     this.refresh({ source: source === 'code' ? 'code' : 'canvas' });
     this.keepFocus();
@@ -548,7 +672,7 @@ export class DiagramEditor {
 
   // Putting the caret inside a flow block shows that flow; leaving the block
   // hides it again, unless it was opened from the canvas.
-  followCaretFlow(line) {
+  followCaretFlow(/** @type {number} */ line) {
     if (!this.model || this.changes) return;
     const flow = flowAtLine(this.model, line);
     if (flow) this.setFlow(flow.id, 'code');
@@ -562,7 +686,7 @@ export class DiagramEditor {
     return this.model?.markdown.trim() !== '' && (width === 0 || width >= NOTES_MIN_WIDTH);
   }
 
-  toggleNotes(force) {
+  toggleNotes(/** @type {boolean | undefined} */ force) {
     const open = force ?? !this.notesOpen;
     if (open && this.model.markdownLine < 0 && !this.readOnly) {
       // No notes yet: start a section in the source and put the caret there.
@@ -608,7 +732,7 @@ export class DiagramEditor {
     return name;
   }
 
-  saveFile(filename, blob) {
+  saveFile(/** @type {string} */ filename, /** @type {Blob} */ blob) {
     if (this.host.saveFile) return this.host.saveFile(filename, blob);
     downloadBlob(blob, filename);
     return undefined;
@@ -616,7 +740,7 @@ export class DiagramEditor {
 
   // Exports exactly what is on screen (a version, the changes view, a flow),
   // without the selection highlight.
-  async exportImage(format) {
+  async exportImage(/** @type {'png' | 'svg'} */ format) {
     if (this.canvas.link) this.canvas.cancelLink();
     const renderer = this.canvas.renderer;
     const selection = renderer.selection;
@@ -632,7 +756,7 @@ export class DiagramEditor {
         await this.saveFile(`${name}.png`, await svgToPng(image, 2));
       }
     } catch (error) {
-      this.notify(`Export failed: ${error.message}`, { error: true });
+      this.notify(`Export failed: ${errorText(error)}`, { error: true });
     }
   }
 
@@ -644,7 +768,7 @@ export class DiagramEditor {
     try {
       await this.saveFile(`${name}.md`, new Blob([note], { type: 'text/markdown' }));
     } catch (error) {
-      this.notify(`Export failed: ${error.message}`, { error: true });
+      this.notify(`Export failed: ${errorText(error)}`, { error: true });
     }
   }
 
@@ -652,11 +776,11 @@ export class DiagramEditor {
 
   // The file changed outside the editor (a sync, git, another app): its text
   // replaces ours as one undoable step, so nothing typed here is lost.
-  applyExternal(doc) {
+  applyExternal(/** @type {DiagramDocument} */ doc) {
     const sameVersions = JSON.stringify(doc.snapshots) === JSON.stringify(this.snapshots);
     if (doc.text === this.text && sameVersions) return false;
     // What was waiting to be saved is replaced (it stays one Undo away).
-    this.win.clearTimeout(this.saveTimer);
+    window.clearTimeout(this.saveTimer);
     this.saveTimer = null;
     this.snapshots = doc.snapshots;
     if (this.version !== 'now' && !this.snapshot(this.version)) this.version = 'now';
@@ -674,7 +798,7 @@ export class DiagramEditor {
     return this.root.classList.contains('is-source-hidden');
   }
 
-  toggleSource(force) {
+  toggleSource(/** @type {boolean | undefined} */ force) {
     const hidden = force ?? !this.sourceHidden;
     this.root.classList.toggle('is-source-hidden', hidden);
     this.canvas.update();
@@ -691,7 +815,7 @@ export class DiagramEditor {
     };
   }
 
-  setViewState(state) {
+  setViewState(/** @type {Partial<ViewState> | null | undefined} */ state) {
     if (!state || typeof state !== 'object') return;
     if (typeof state.codeWidth === 'string' && /^\d+(\.\d+)?(px|%)$/.test(state.codeWidth)) {
       this.root.style.setProperty('--sd-code-width', state.codeWidth);
@@ -711,7 +835,7 @@ export class DiagramEditor {
 
   // ---------------------------------------------------------------- versions
 
-  saveVersion(name) {
+  saveVersion(/** @type {string} */ name) {
     this.snapshots.push({
       id: newId(),
       name: name || `v${this.snapshots.length + 1}`,
@@ -723,7 +847,7 @@ export class DiagramEditor {
     this.saveNow();
   }
 
-  renameVersion(id, name) {
+  renameVersion(/** @type {string} */ id, /** @type {string} */ name) {
     const snapshot = this.snapshot(id);
     if (!snapshot) return;
     snapshot.name = name;
@@ -731,7 +855,7 @@ export class DiagramEditor {
     this.saveNow();
   }
 
-  deleteVersion(id) {
+  deleteVersion(/** @type {string} */ id) {
     this.snapshots = this.snapshots.filter((s) => s.id !== id);
     if (this.version === id) this.version = 'now';
     if (this.baseOverride === id) this.baseOverride = null;
@@ -740,7 +864,7 @@ export class DiagramEditor {
     this.saveNow();
   }
 
-  viewVersion(id) {
+  viewVersion(/** @type {string} */ id) {
     if (id !== 'now' && !this.snapshot(id)) return;
     if (id === this.version) return;
     this.version = id;
@@ -754,7 +878,7 @@ export class DiagramEditor {
 
   // Restoring never loses work: unless the current text is already saved as
   // a version, it is saved first. It is also a normal, undoable edit.
-  restoreVersion(id) {
+  restoreVersion(/** @type {string} */ id) {
     const snapshot = this.snapshot(id);
     if (!snapshot) return;
     this.version = 'now';
@@ -784,7 +908,7 @@ export class DiagramEditor {
     this.keepFocus();
   }
 
-  setBase(id) {
+  setBase(/** @type {string} */ id) {
     if (!this.snapshot(id) || id === this.version) return;
     this.baseOverride = id;
     this.changes = true;
@@ -806,17 +930,21 @@ export class DiagramEditor {
   // Versions are saved at once (saveNow): an outside change arriving in the
   // next moment then finds them already written.
   scheduleSave() {
-    this.win.clearTimeout(this.saveTimer);
-    this.saveTimer = this.win.setTimeout(() => this.saveNow(), SAVE_DELAY);
+    window.clearTimeout(this.saveTimer);
+    /**
+     * The save waiting to write a change, or null.
+     * @type {number | null}
+     */
+    this.saveTimer = window.setTimeout(() => this.saveNow(), SAVE_DELAY);
   }
 
   saveNow() {
-    this.win.clearTimeout(this.saveTimer);
+    window.clearTimeout(this.saveTimer);
     this.saveTimer = null;
     this.host.save(this.document);
   }
 
-  onKeyDown(event) {
+  onKeyDown(/** @type {KeyboardEvent} */ event) {
     const mod = event.metaKey || event.ctrlKey;
     if (!mod) return;
     const key = event.key.toLowerCase();
@@ -837,11 +965,11 @@ export class DiagramEditor {
     }
   }
 
-  onSplitterDown(event) {
+  onSplitterDown(/** @type {PointerEvent} */ event) {
     event.preventDefault();
     const bounds = this.root.getBoundingClientRect();
     this.splitter.setPointerCapture(event.pointerId);
-    const move = (e) => {
+    const move = (/** @type {PointerEvent} */ e) => {
       const width = Math.min(bounds.width * 0.7, Math.max(220, e.clientX - bounds.left));
       this.root.style.setProperty('--sd-code-width', `${width}px`);
     };
@@ -854,6 +982,12 @@ export class DiagramEditor {
   }
 }
 
+/**
+ * Creates an editor in `container` and loads the host's document into it.
+ * @param {HTMLElement} container
+ * @param {EditorHost} host
+ * @returns {Promise<DiagramEditor>}
+ */
 export async function mountEditor(container, host) {
   const editor = new DiagramEditor(container, host);
   await editor.init();

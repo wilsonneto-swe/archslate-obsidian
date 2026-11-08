@@ -10,11 +10,27 @@
 
 import { renamedPath } from './auto-open.js';
 
+/** @typedef {import('../../../packages/types').StoredViewState} StoredViewState */
+/** @typedef {import('../../../packages/types').StoredViewStates} StoredViewStates */
+/** @typedef {import('../../../packages/types').StoredViewStatesInput} StoredViewStatesInput */
+/** @typedef {import('../../../packages/types').ViewState} ViewState */
+/** @typedef {import('../../../packages/types').ViewStateEntry} ViewStateEntry */
+
 export const MAX_NOTES = 200;
 export const STORE_VERSION = 1;
 
+/**
+ * A finite number (not NaN, not ±Infinity).
+ * @param {unknown} n
+ * @returns {n is number}
+ */
 const isNumber = (n) => typeof n === 'number' && Number.isFinite(n);
 
+/**
+ * A view state as kept: each field checked, a bad one replaced by its default.
+ * @param {StoredViewState | null | undefined} value
+ * @returns {ViewState | null} null when `value` is not an object
+ */
 function cleanState(value) {
   if (!value || typeof value !== 'object') return null;
   const out = {};
@@ -28,7 +44,11 @@ function cleanState(value) {
 }
 
 export class ViewStateStore {
-  constructor(data) {
+  constructor(/** @type {StoredViewStatesInput | null | undefined} */ data) {
+    /**
+     * By note path, the one used longest ago first.
+     * @type {Map<string, ViewStateEntry>}
+     */
     this.notes = new Map();
     if (data && typeof data === 'object' && data.version === STORE_VERSION && data.notes && typeof data.notes === 'object') {
       for (const [path, entry] of Object.entries(data.notes)) {
@@ -38,12 +58,12 @@ export class ViewStateStore {
     }
   }
 
-  get(path) {
+  get(/** @type {string} */ path) {
     return this.notes.get(path)?.state ?? null;
   }
 
   /** Returns true when something changed (so the data needs saving). */
-  set(path, state, now = Date.now()) {
+  set(/** @type {string} */ path, /** @type {ViewState} */ state, /** @type {number} */ now = Date.now()) {
     const clean = cleanState(state);
     if (!clean) return false;
     const before = this.notes.get(path);
@@ -51,6 +71,7 @@ export class ViewStateStore {
     this.notes.delete(path);
     this.notes.set(path, { state: clean, at: now });
     while (this.notes.size > MAX_NOTES) {
+      /** @type {[string, ViewStateEntry] | null} */
       let oldest = null;
       for (const [key, entry] of this.notes) if (!oldest || entry.at < oldest[1].at) oldest = [key, entry];
       this.notes.delete(oldest[0]);
@@ -58,7 +79,7 @@ export class ViewStateStore {
     return true;
   }
 
-  rename(oldPath, newPath) {
+  rename(/** @type {string} */ oldPath, /** @type {string} */ newPath) {
     let changed = false;
     for (const [path, entry] of [...this.notes]) {
       const to = renamedPath(path, oldPath, newPath);
@@ -70,7 +91,7 @@ export class ViewStateStore {
     return changed;
   }
 
-  delete(path) {
+  delete(/** @type {string} */ path) {
     let changed = false;
     for (const key of [...this.notes.keys()]) {
       if (key === path || key.startsWith(`${path}/`)) {

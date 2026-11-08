@@ -20,26 +20,98 @@
 
 import { KIND_NAMES, LEGACY_OPS, resolveKind } from './kinds.js';
 
+/** @typedef {import('../types').Model} Model */
+/** @typedef {import('../types').DiagramFlow} DiagramFlow */
+/** @typedef {import('../types').TokenizedLine} TokenizedLine */
+/** @typedef {import('../types').TextRange} TextRange */
+/** @typedef {import('../types').LinkOp} LinkOp */
+/** @typedef {import('../types').ArrowText} ArrowText */
+/** @typedef {import('../types').Token} Token */
+/** @typedef {import('../types').WordToken} WordToken */
+/** @typedef {import('../types').StringToken} StringToken */
+/** @typedef {import('../types').TextToken} TextToken */
+/** @typedef {import('../types').PropsToken} PropsToken */
+/** @typedef {import('../types').ArrowToken} ArrowToken */
+/** @typedef {import('../types').ColonToken} ColonToken */
+/** @typedef {import('../types').LbraceToken} LbraceToken */
+/** @typedef {import('../types').LineProblem} LineProblem */
+/** @typedef {import('../types').LinkLine} LinkLine */
+/** @typedef {import('../types').DiagramNode} DiagramNode */
+/** @typedef {import('../types').DiagramGroup} DiagramGroup */
+/** @typedef {import('../types').DiagramEdge} DiagramEdge */
+/** @typedef {import('../types').DiagramNote} DiagramNote */
+
+/**
+ * What readRawText() finds after a ":": the label and the trailing "[details]"
+ * (either may be missing), and where tokenizing goes on.
+ * @typedef {{ next: number, tokens: Array<TextToken | PropsToken> }} RawText
+ */
+
+/**
+ * A declaration line's tokens: parse() hands a line to parseNode, parseGroup,
+ * parseFlow and parseNote once its first token is a word.
+ * @typedef {[WordToken, ...Token[]]} DeclarationTokens
+ */
+
+/**
+ * A link line's tokens (a link, or a step in a flow): parse() hands a line to
+ * parseLink once its second token is an arrow.
+ * @typedef {[Token, ArrowToken, ...Token[]]} LinkLineTokens
+ */
+
+/**
+ * The opening line of a group or a flow, `keyword [id] ["Title"] {`, as
+ * parseBlockHeader() reads it.
+ * @typedef {{ idToken: WordToken | null, labelToken: StringToken | null, open: LbraceToken }} BlockHeader
+ */
+
 // Names are letters (with their combining marks: Devanagari, Thai...), digits,
 // "_", "." and "-".
 const WORD_CHAR = /[\p{L}\p{M}\p{N}_.-]/u;
+/** @type {ArrowText[]} */
 const ARROWS = ['<->', '-->', '->', '=>'];
 const COUNT = /^x(\d+|n)$/i;
 // Deeper nesting than any drawing needs: past it, the layout's tree walks
 // would run out of stack.
 const MAX_GROUP_DEPTH = 40;
 // Pasted text brings no-break and zero-width spaces: they separate like a space.
+/**
+ * @param {string} c one character
+ * @returns {boolean}
+ */
 const isSpace = (c) => c === ' ' || c === '\t' || c === '\r' || c === '\u00a0' || c === '\u200b' || c === '\ufeff' || /\p{Zs}/u.test(c);
 // The character at `i`, a whole code point (letters past U+FFFF are two units).
+/**
+ * @param {string} line
+ * @param {number} i
+ * @returns {string}
+ */
 const charAt = (line, i) => String.fromCodePoint(line.codePointAt(i));
 
 export const SEPARATOR = '---';
+/**
+ * Whether a line is the "---" that starts the markdown section.
+ * @param {string} line
+ * @returns {boolean}
+ */
 export const isSeparator = (line) => line.trim() === SEPARATOR;
 
+/**
+ * The arrow that starts at `i`, as written, or null.
+ * @param {string} line
+ * @param {number} i
+ * @returns {ArrowText | null}
+ */
 function arrowAt(line, i) {
   return ARROWS.find((arrow) => line.startsWith(arrow, i)) ?? null;
 }
 
+/**
+ * The quoted string whose opening quote is at `start`.
+ * @param {string} line
+ * @param {number} start
+ * @returns {StringToken}
+ */
 function readString(line, start) {
   let value = '';
   let i = start + 1;
@@ -61,6 +133,11 @@ function readString(line, start) {
 // Unquoted text after ":" runs to the end of the line. A comment only starts
 // after whitespace there, so "http://x" and "#1" inside a label survive. A
 // trailing "[...]" is split off as the link's details.
+/**
+ * @param {string} line
+ * @param {number} start just after the ":"
+ * @returns {RawText}
+ */
 function readRawText(line, start) {
   let i = start;
   while (i < line.length && isSpace(line[i])) i += 1;
@@ -77,6 +154,7 @@ function readRawText(line, start) {
   let tokenEnd = end;
   while (tokenEnd > i && isSpace(line[tokenEnd - 1])) tokenEnd -= 1;
 
+  /** @type {Array<TextToken | PropsToken>} */
   const tokens = [];
   let labelEnd = tokenEnd;
   if (line[tokenEnd - 1] === ']') {
@@ -91,9 +169,17 @@ function readRawText(line, start) {
   return { next: end, tokens };
 }
 
+/**
+ * Splits one source line into tokens, its comment and its problems.
+ * @param {string} line
+ * @returns {TokenizedLine}
+ */
 export function tokenizeLine(line) {
+  /** @type {Token[]} */
   const tokens = [];
+  /** @type {LineProblem[]} */
   const problems = [];
+  /** @type {TextRange | null} */
   let comment = null;
   let i = 0;
 
@@ -113,6 +199,10 @@ export function tokenizeLine(line) {
       }
       i = token.end;
     } else if (arrow) {
+      /**
+       * The operator: LEGACY_OPS maps "=>", the only arrow that is not one itself.
+       * @type {LinkOp}
+       */
       const value = LEGACY_OPS[arrow] ?? arrow;
       tokens.push({ type: 'arrow', value, raw: arrow, start: i, end: i + arrow.length });
       i += arrow.length;
@@ -147,6 +237,11 @@ export function tokenizeLine(line) {
   return { tokens, comment, problems };
 }
 
+/**
+ * "a, b ,, c" -> ["a", "b", "c"]: the details between "[" and "]".
+ * @param {string} value
+ * @returns {string[]}
+ */
 export function splitProps(value) {
   return value
     .split(',')
@@ -154,12 +249,21 @@ export function splitProps(value) {
     .filter(Boolean);
 }
 
+/**
+ * Whether a word is an instance count: "x3", "xN".
+ * @param {string} word
+ * @returns {boolean}
+ */
 export function isCountWord(word) {
   return COUNT.test(word);
 }
 
 // "Café orders" -> "cafe_orders": accents on Latin letters go, other scripts
 // keep their marks.
+/**
+ * @param {string} text
+ * @returns {string}
+ */
 export function slugify(text) {
   return text
     .normalize('NFD')
@@ -170,8 +274,14 @@ export function slugify(text) {
     .replace(/^_+|_+$/g, '');
 }
 
+/**
+ * Reads a diagram's text. Never throws: problems go to `errors`.
+ * @param {string} text
+ * @returns {Model}
+ */
 export function parse(text) {
   const lines = text.split('\n');
+  /** @type {Model} */
   const model = {
     text,
     lines,
@@ -197,14 +307,32 @@ export function parse(text) {
     markdown: '',
   };
 
+  /** @type {DiagramGroup[]} */
   const stack = [];
+  /** @type {DiagramFlow | null} */
   let flow = null;
+  /**
+   * Links wait for every component to be declared; each gets its key then.
+   * @type {DiagramEdge[]}
+   */
   const pendingEdges = [];
+  /**
+   * Notes wait for every component to be declared; each gets its key then.
+   * @type {DiagramNote[]}
+   */
   const pendingNotes = [];
+  /** @type {Set<string>} */
   const taken = new Set();
+  /** @type {Set<string>} */
   const flowIds = new Set();
+  /** @type {DiagramGroup[]} */
   const derived = [];
 
+  /**
+   * @param {number} line
+   * @param {TextRange | null | undefined} token what to mark; the whole line when missing
+   * @param {string} message
+   */
   const fail = (line, token, message) => {
     model.errors.push({
       line,
@@ -214,6 +342,13 @@ export function parse(text) {
     });
   };
 
+  /**
+   * Takes a component's or a group's name; false, with an error, when it is taken.
+   * @param {string} id
+   * @param {number} line
+   * @param {TextRange} token
+   * @returns {boolean}
+   */
   const claim = (id, line, token) => {
     if (taken.has(id)) {
       fail(line, token, `"${id}" is already declared`);
@@ -223,6 +358,10 @@ export function parse(text) {
     return true;
   };
 
+  /**
+   * @param {DeclarationTokens} tokens
+   * @param {number} line
+   */
   const parseNode = (tokens, line) => {
     const [kindToken, idToken, ...rest] = tokens;
     const kind = resolveKind(kindToken.value);
@@ -235,8 +374,11 @@ export function parse(text) {
       return;
     }
 
+    /** @type {StringToken | null} */
     let labelToken = null;
+    /** @type {WordToken | null} */
     let countToken = null;
+    /** @type {PropsToken | null} */
     let propsToken = null;
     for (const [index, token] of rest.entries()) {
       if (token.type === 'string' && !labelToken) {
@@ -254,6 +396,7 @@ export function parse(text) {
       }
     }
 
+    /** @type {number | 'N' | null} */
     let count = null;
     if (countToken) {
       const value = countToken.value.slice(1);
@@ -272,6 +415,7 @@ export function parse(text) {
     if (!claim(idToken.value, line, idToken)) return;
 
     const group = stack.at(-1) ?? null;
+    /** @type {DiagramNode} */
     const node = {
       id: idToken.value,
       kind,
@@ -289,9 +433,17 @@ export function parse(text) {
   };
 
   // Shared by groups and flows: `keyword [id] ["Title"] {`.
+  /**
+   * @param {DeclarationTokens} tokens
+   * @param {number} line
+   * @param {'group' | 'flow'} noun
+   * @returns {BlockHeader | null}
+   */
   const parseBlockHeader = (tokens, line, noun) => {
     let i = 1;
+    /** @type {WordToken | null} */
     const idToken = tokens[i]?.type === 'word' ? tokens[i++] : null;
+    /** @type {StringToken | null} */
     const labelToken = tokens[i]?.type === 'string' ? tokens[i++] : null;
     const open = tokens[i];
     if (open?.type !== 'lbrace') {
@@ -309,6 +461,10 @@ export function parse(text) {
     return { idToken, labelToken, open };
   };
 
+  /**
+   * @param {DeclarationTokens} tokens
+   * @param {number} line
+   */
   const parseGroup = (tokens, line) => {
     const header = parseBlockHeader(tokens, line, 'group');
     if (!header) return;
@@ -328,6 +484,7 @@ export function parse(text) {
     }
 
     const parent = stack.at(-1) ?? null;
+    /** @type {DiagramGroup} */
     const group = {
       id,
       label: labelToken?.value || id,
@@ -372,6 +529,10 @@ export function parse(text) {
     }
   };
 
+  /**
+   * @param {DeclarationTokens} tokens
+   * @param {number} line
+   */
   const parseFlow = (tokens, line) => {
     if (stack.length) {
       fail(line, tokens[0], 'Flows go at the top level, outside groups');
@@ -402,6 +563,11 @@ export function parse(text) {
     model.flowById.set(id, flow);
   };
 
+  /**
+   * @param {LinkLineTokens} tokens
+   * @param {number} line
+   * @returns {LinkLine | null}
+   */
   const parseLink = (tokens, line) => {
     const [fromToken, arrow, toToken, ...rest] = tokens;
     if (fromToken.type !== 'word') {
@@ -412,8 +578,11 @@ export function parse(text) {
       fail(line, toToken ?? arrow, 'Expected a name after the arrow');
       return null;
     }
+    /** @type {ColonToken | null} */
     let colon = null;
+    /** @type {TextToken | StringToken | null} */
     let labelToken = null;
+    /** @type {PropsToken | null} */
     let propsToken = null;
     for (const token of rest) {
       if (token.type === 'arrow') {
@@ -445,6 +614,10 @@ export function parse(text) {
     };
   };
 
+  /**
+   * @param {DeclarationTokens} tokens
+   * @param {number} line
+   */
   const parseNote = (tokens, line) => {
     const [keyword, targetToken, textToken, extra] = tokens;
     if (targetToken?.type !== 'word') {
@@ -467,6 +640,11 @@ export function parse(text) {
     });
   };
 
+  /**
+   * A line inside a flow's block: a step, or the "}" that closes the flow.
+   * @param {Token[]} tokens
+   * @param {number} line
+   */
   const parseFlowLine = (tokens, line) => {
     const [first, second] = tokens;
     if (first.type === 'rbrace') {
@@ -552,9 +730,16 @@ export function parse(text) {
     fail(flow.line, flow.tokens.open, `Flow "${flow.id}" is never closed`);
   }
 
+  /**
+   * Whether both ends of a link (or a step) are declared components; an error for each that is not.
+   * @param {LinkLine} item
+   * @returns {boolean}
+   */
   const checkEnds = (item) => {
     let valid = true;
-    for (const end of ['from', 'to']) {
+    /** @type {('from' | 'to')[]} */
+    const ends = ['from', 'to'];
+    for (const end of ends) {
       const id = item[end];
       if (model.groupById.has(id)) {
         fail(item.line, item.tokens[end], `"${id}" is a group. Link to a component inside it`);
@@ -567,6 +752,7 @@ export function parse(text) {
     return valid;
   };
 
+  /** @type {Map<string, number>} */
   const seen = new Map();
   for (const edge of pendingEdges) {
     if (!checkEnds(edge)) continue;
@@ -579,6 +765,7 @@ export function parse(text) {
     model.lineIndex.set(edge.line, { type: 'edge', key: edge.key });
   }
 
+  /** @type {Map<string, number>} */
   const notesPerTarget = new Map();
   for (const note of pendingNotes) {
     if (model.groupById.has(note.target)) {
@@ -629,6 +816,11 @@ export function parse(text) {
 }
 
 // The flow whose block contains `line`, if any.
+/**
+ * @param {Model} model
+ * @param {number} line
+ * @returns {DiagramFlow | null}
+ */
 export function flowAtLine(model, line) {
   return model.flows.find((flow) => line >= flow.line && line <= flow.endLine) ?? null;
 }

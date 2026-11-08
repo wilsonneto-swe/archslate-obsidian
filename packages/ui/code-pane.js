@@ -7,11 +7,30 @@ import { resolveKind } from '../core/kinds.js';
 import { el, viewOf } from './dom.js';
 import { isComposing } from './keys.js';
 
+/** @typedef {import('../types').CodePaneHandlers} CodePaneHandlers */
+/** @typedef {import('../types').CodePaneState} CodePaneState */
+/** @typedef {import('../types').LinkOp} LinkOp */
+/** @typedef {import('../types').ParseError} ParseError */
+/** @typedef {import('../types').Token} Token */
+
+/**
+ * What highlightMarkdown() carries from one line to the next: whether the
+ * lines so far opened a fenced code block that is not closed yet.
+ * @typedef {{ fence: boolean }} MarkdownState
+ */
+
 const INDENT = '  ';
 const KEYWORDS = new Set(['group', 'direction', 'flow', 'note']);
+/** @type {Record<LinkOp, string>} */
 const ARROW_CLASS = { '->': 'sd-tok-request', '-->': 'sd-tok-event', '<->': 'sd-tok-connection' };
 
+/**
+ * The class of each of a line's tokens ('' for none), from its type and place.
+ * @param {Token[]} tokens
+ * @returns {string[]}
+ */
 function classify(tokens) {
+  /** @type {string[]} */
   const classes = new Array(tokens.length).fill('');
   const [first, second] = tokens;
   if (!first) return classes;
@@ -40,7 +59,13 @@ function classify(tokens) {
 
 // Light markdown colouring for the notes below "---". Text is never changed,
 // only wrapped, so the mirror stays aligned with the textarea.
+/**
+ * @param {string} line
+ * @param {MarkdownState} state
+ * @returns {Array<string | HTMLSpanElement | null>}
+ */
 function highlightMarkdown(line, state) {
+  /** @type {(cls: string, text: string) => HTMLSpanElement | null} */
   const span = (cls, text) => (text ? el('span', { class: cls, text }) : null);
   if (/^\s*(```|~~~)/.test(line)) {
     state.fence = !state.fence;
@@ -50,6 +75,7 @@ function highlightMarkdown(line, state) {
   const heading = line.match(/^(\s{0,3}#{1,6}\s+)(.*)$/);
   if (heading) return [span('sd-md-mark', heading[1]), span('sd-md-heading', heading[2])];
   const prefix = line.match(/^(\s*)(>\s?|(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)/);
+  /** @type {Array<string | HTMLSpanElement | null>} */
   const parts = [];
   let rest = line;
   if (prefix) {
@@ -67,6 +93,12 @@ function highlightMarkdown(line, state) {
   return parts.filter((part) => part !== null && part !== '');
 }
 
+/**
+ * A diagram source line as coloured spans, with its errors underlined.
+ * @param {string} line
+ * @param {ParseError[]} errors
+ * @returns {Array<string | HTMLSpanElement>}
+ */
 function highlightLine(line, errors) {
   const { tokens, comment } = tokenizeLine(line);
   const classes = classify(tokens);
@@ -74,14 +106,17 @@ function highlightLine(line, errors) {
   if (comment) spans.push({ ...comment, cls: 'sd-tok-comment' });
 
   // Paint character classes, then overlay error ranges.
+  /** @type {string[]} */
   const cls = new Array(line.length).fill('');
   for (const span of spans) for (let i = span.start; i < span.end; i += 1) cls[i] = span.cls;
+  /** @type {boolean[]} */
   const bad = new Array(line.length).fill(false);
   for (const error of errors) {
     const end = Math.max(error.end, error.start + 1);
     for (let i = error.start; i < Math.min(end, line.length); i += 1) bad[i] = true;
   }
 
+  /** @type {Array<string | HTMLSpanElement>} */
   const parts = [];
   let i = 0;
   while (i < line.length) {
@@ -97,7 +132,7 @@ function highlightLine(line, errors) {
 }
 
 export class CodePane {
-  constructor({ onInput, onCaretLine, onUndo, onRedo, onEscape }) {
+  constructor(/** @type {CodePaneHandlers} */ { onInput, onCaretLine, onUndo, onRedo, onEscape }) {
     this.handlers = { onInput, onCaretLine, onUndo, onRedo, onEscape };
     this.textarea = el('textarea', { class: 'sd-code-input', wrap: 'off', 'aria-label': 'Diagram source' });
     // Ids and kinds are not words: no spellcheck, autocorrect, smart quotes or
@@ -157,7 +192,7 @@ export class CodePane {
     }
   }
 
-  onKeyDown(event) {
+  onKeyDown(/** @type {KeyboardEvent} */ event) {
     const ta = this.textarea;
     // Keys that confirm an input method's composition are not edits.
     if (ta.readOnly || isComposing(event)) return;
@@ -220,7 +255,7 @@ export class CodePane {
     }
   }
 
-  replace(start, end, text, caretStart, caretEnd = caretStart) {
+  replace(/** @type {number} */ start, /** @type {number} */ end, /** @type {string} */ text, /** @type {number} */ caretStart, /** @type {number} */ caretEnd = caretStart) {
     const ta = this.textarea;
     ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
     ta.setSelectionRange(caretStart, caretEnd);
@@ -235,7 +270,7 @@ export class CodePane {
   }
 
   // `lineMarks` maps line number -> extra class (selection, diff status).
-  update({ text, model, readOnly, lineMarks, banner, onJump }) {
+  update(/** @type {CodePaneState} */ { text, model, readOnly, lineMarks, banner, onJump }) {
     const ta = this.textarea;
     if (ta.value !== text) {
       const { selectionStart, selectionEnd } = ta;
@@ -245,6 +280,7 @@ export class CodePane {
     ta.readOnly = readOnly;
     this.root.classList.toggle('is-readonly', readOnly);
 
+    /** @type {Map<number, ParseError[]>} */
     const errorsByLine = new Map();
     for (const error of model.errors) {
       if (!errorsByLine.has(error.line)) errorsByLine.set(error.line, []);
@@ -252,12 +288,16 @@ export class CodePane {
     }
 
     const lines = text.split('\n');
+    /** @type {HTMLDivElement[]} */
     const rows = [];
+    /** @type {HTMLDivElement[]} */
     const numbers = [];
+    /** @type {MarkdownState} */
     const markdown = { fence: false };
     lines.forEach((line, i) => {
       const errors = errorsByLine.get(i) ?? [];
       const marks = lineMarks.get(i) ?? '';
+      /** @type {HTMLSpanElement | Array<string | HTMLSpanElement | null>} */
       let content;
       if (model.markdownLine >= 0 && i === model.markdownLine) content = el('span', { class: 'sd-tok-separator', text: line });
       else if (model.markdownLine >= 0 && i > model.markdownLine) content = highlightMarkdown(line, markdown);
@@ -295,7 +335,7 @@ export class CodePane {
     if (banner) this.banner.replaceChildren(banner);
   }
 
-  revealLine(line) {
+  revealLine(/** @type {number} */ line) {
     if (this.focused) return;
     const lineHeight = parseFloat(viewOf(this.textarea).getComputedStyle(this.textarea).lineHeight) || 20;
     const top = line * lineHeight;
@@ -305,7 +345,7 @@ export class CodePane {
     }
   }
 
-  jumpTo(line, column = 0) {
+  jumpTo(/** @type {number} */ line, /** @type {number} */ column = 0) {
     const lines = this.textarea.value.split('\n');
     let offset = 0;
     for (let i = 0; i < line; i += 1) offset += lines[i].length + 1;

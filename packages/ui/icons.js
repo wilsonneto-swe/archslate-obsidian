@@ -2,10 +2,21 @@
 
 import { svg } from './dom.js';
 
+/**
+ * Path data for a circle of radius `r` around (cx, cy), as two arcs.
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} r
+ * @returns {string}
+ */
 const circle = (cx, cy, r) => {
   return `M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0z`;
 };
 
+/**
+ * Path data by kind name (and 'group'). Looked up with any word.
+ * @type {Record<string, string>}
+ */
 export const KIND_ICONS = {
   client: 'M3 5.5A1.5 1.5 0 0 1 4.5 4h15A1.5 1.5 0 0 1 21 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5zM3 9h18M6 6.5h.01M8.5 6.5h.01',
   mobile: 'M8.5 2.5h7A1.5 1.5 0 0 1 17 4v16a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 7 20V4a1.5 1.5 0 0 1 1.5-1.5zM11 18.5h2',
@@ -32,6 +43,10 @@ export const KIND_ICONS = {
   group: 'M4 6.5A1.5 1.5 0 0 1 5.5 5H10l2 2h6.5A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z',
 };
 
+/**
+ * Path data by icon name. Looked up with any word.
+ * @type {Record<string, string>}
+ */
 export const UI_ICONS = {
   plus: 'M12 5v14M5 12h14',
   link: 'M5 12h11M12 7l5 5-5 5',
@@ -63,6 +78,13 @@ export const UI_ICONS = {
   chevronDown: 'M6 9l6 6 6-6',
 };
 
+/**
+ * An icon by name: a kind (KIND_ICONS) or a UI icon (UI_ICONS).
+ * @param {string} name
+ * @param {number} [size]
+ * @param {string} [className]
+ * @returns {SVGSVGElement}
+ */
 export function icon(name, size = 16, className = 'sd-icon') {
   const d = KIND_ICONS[name] ?? UI_ICONS[name];
   return svg(

@@ -8,13 +8,49 @@
 
 import { KINDS, OPS } from './kinds.js';
 
+/** @typedef {import('../types').Model} Model */
+/** @typedef {import('../types').UnionModel} UnionModel */
+/** @typedef {import('../types').DiffSummary} DiffSummary */
+/** @typedef {import('../types').DiffStatus} DiffStatus */
+/** @typedef {import('../types').DiffNode} DiffNode */
+/** @typedef {import('../types').DiffEdge} DiffEdge */
+/** @typedef {import('../types').DiffGroup} DiffGroup */
+/** @typedef {import('../types').DiffNote} DiffNote */
+/** @typedef {import('../types').DiagramNode} DiagramNode */
+/** @typedef {import('../types').DiagramEdge} DiagramEdge */
+/** @typedef {import('../types').DiagramNote} DiagramNote */
+/** @typedef {import('../types').DiagramFlow} DiagramFlow */
+
+/**
+ * The kinds of item the summary counts: the fields of a DiffSummary that are DiffCounts.
+ * @typedef {'nodes' | 'edges' | 'groups' | 'notes' | 'flows'} DiffBucket
+ */
+
+/**
+ * The older note a note of the newer version pairs up with; `changed` when its
+ * text is not the same.
+ * @typedef {{ previous: DiagramNote, changed: boolean }} NotePair
+ */
+
+/** @type {(a: string[], b: string[]) => boolean} */
 const sameList = (a, b) => a.length === b.length && a.every((value, i) => value === b[i]);
+/** @type {(count: DiagramNode['count']) => string} */
 const countText = (count) => `×${count ?? 1}`;
+/** @type {(props: string[]) => string} */
 const propsNote = (props) => (props.length ? `was [${props.join(', ')}]` : 'details added');
 
+/**
+ * Pairs each link of the newer version with a link of the older one between the
+ * same components, closest match first; `removed` are the older links left over.
+ * @param {DiagramEdge[]} before
+ * @param {DiagramEdge[]} after
+ * @returns {{ pairs: Map<DiagramEdge, DiagramEdge>, removed: DiagramEdge[] }}
+ */
 function pairEdges(before, after) {
   const remaining = [...before];
+  /** @type {Map<DiagramEdge, DiagramEdge>} */
   const pairs = new Map();
+  /** @type {(predicate: (e: DiagramEdge) => boolean) => DiagramEdge | null} */
   const take = (predicate) => {
     const index = remaining.findIndex(predicate);
     return index >= 0 ? remaining.splice(index, 1)[0] : null;
@@ -22,6 +58,7 @@ function pairEdges(before, after) {
   // Closest matches first: with parallel links ("a -> b: reads" and
   // "a -> b: writes", or "a -> b" and "a --> b"), deleting or changing one is
   // not read as a change to the other.
+  /** @type {Array<(e: DiagramEdge, edge: DiagramEdge) => boolean>} */
   const passes = [
     (e, edge) => e.op === edge.op && e.label === edge.label && sameList(e.props, edge.props),
     (e, edge) => e.op === edge.op && e.label === edge.label,
@@ -40,8 +77,14 @@ function pairEdges(before, after) {
 
 // Notes have no id. Same text on the same component is the same note; what is
 // left over on a component pairs up in order as edits.
+/**
+ * @param {DiagramNote[]} before
+ * @param {DiagramNote[]} after
+ * @returns {{ pairs: Map<DiagramNote, NotePair>, removed: DiagramNote[] }}
+ */
 function pairNotes(before, after) {
   const remaining = [...before];
+  /** @type {Map<DiagramNote, NotePair>} */
   const pairs = new Map();
   for (const note of after) {
     const index = remaining.findIndex((n) => n.target === note.target && n.text === note.text);
@@ -55,6 +98,11 @@ function pairNotes(before, after) {
   return { pairs, removed: remaining };
 }
 
+/**
+ * @param {DiagramNode} previous
+ * @param {DiagramNode} node
+ * @returns {boolean}
+ */
 function nodeChanged(previous, node) {
   return (
     previous.label !== node.label ||
@@ -65,6 +113,12 @@ function nodeChanged(previous, node) {
   );
 }
 
+/**
+ * What changed on a component, for its caption.
+ * @param {DiagramNode} previous
+ * @param {DiagramNode} node
+ * @returns {string}
+ */
 function nodeNote(previous, node) {
   if (previous.label !== node.label) return `was "${previous.label}"`;
   if (previous.kind !== node.kind) return `was ${KINDS[previous.kind]?.label ?? previous.kind}`;
@@ -76,7 +130,14 @@ function nodeNote(previous, node) {
   return previous.group ? `moved from ${previous.group}` : 'moved into group';
 }
 
+/**
+ * What changed on a link, for its label.
+ * @param {DiagramEdge} previous
+ * @param {DiagramEdge} edge
+ * @returns {string}
+ */
 function edgeNote(previous, edge) {
+  /** @type {string[]} */
   const notes = [];
   if (previous.op !== edge.op) notes.push(`was ${OPS[previous.op]?.name ?? previous.op}`);
   if (previous.label !== edge.label) {
@@ -86,9 +147,16 @@ function edgeNote(previous, edge) {
   return notes.join(', ');
 }
 
+/** @type {(flow: DiagramFlow) => string} */
 const stepsKey = (flow) => JSON.stringify([flow.label, flow.steps.map((s) => [s.from, s.op, s.to, s.label])]);
 
+/**
+ * @param {Model} before
+ * @param {Model} after
+ * @returns {UnionModel}
+ */
 export function unionModel(before, after) {
+  /** @type {DiffSummary} */
   const summary = {
     nodes: { added: 0, removed: 0, changed: 0 },
     edges: { added: 0, removed: 0, changed: 0 },
@@ -98,13 +166,17 @@ export function unionModel(before, after) {
     markdownChanged: before.markdown.trim() !== after.markdown.trim(),
     directionChanged: before.direction !== after.direction,
   };
+  /** @type {(bucket: DiffBucket, status: DiffStatus) => void} */
   const count = (bucket, status) => {
     if (status !== 'same') summary[bucket][status] += 1;
   };
 
+  /** @type {DiffNode[]} */
   const nodes = after.nodes.map((node) => {
     const previous = before.nodeById.get(node.id);
+    /** @type {DiffStatus} */
     let status = 'added';
+    /** @type {string | undefined} */
     let caption;
     if (previous) {
       const changed = nodeChanged(previous, node);
@@ -121,8 +193,10 @@ export function unionModel(before, after) {
     }
   }
 
+  /** @type {DiffGroup[]} */
   const groups = after.groups.map((group) => {
     const previous = before.groupById.get(group.id);
+    /** @type {DiffStatus} */
     let status = 'added';
     if (previous) status = previous.label !== group.label || previous.parent !== group.parent ? 'changed' : 'same';
     count('groups', status);
@@ -136,9 +210,12 @@ export function unionModel(before, after) {
   }
 
   const { pairs, removed } = pairEdges(before.edges, after.edges);
+  /** @type {DiffEdge[]} */
   const edges = after.edges.map((edge) => {
     const previous = pairs.get(edge);
+    /** @type {DiffStatus} */
     let status = 'added';
+    /** @type {string | undefined} */
     let displayLabel;
     if (previous) {
       const changed = previous.op !== edge.op || previous.label !== edge.label || !sameList(previous.props, edge.props);
@@ -166,6 +243,7 @@ export function unionModel(before, after) {
   }
 
   const notePairs = pairNotes(before.notes, after.notes);
+  /** @type {DiffNote[]} */
   const notes = after.notes.map((note) => {
     const pair = notePairs.pairs.get(note);
     const status = !pair ? 'added' : pair.changed ? 'changed' : 'same';
@@ -193,9 +271,14 @@ export function unionModel(before, after) {
   };
 }
 
+/**
+ * Whether nothing at all changed.
+ * @param {DiffSummary} summary
+ * @returns {boolean}
+ */
 export function isEmptySummary(summary) {
   if (summary.markdownChanged || summary.directionChanged) return false;
-  return Object.values(summary).every((bucket) => {
+  return Object.values(summary).every((/** @type {DiffSummary[keyof DiffSummary]} */ bucket) => {
     return typeof bucket !== 'object' || (bucket.added === 0 && bucket.removed === 0 && bucket.changed === 0);
   });
 }

@@ -62,15 +62,40 @@
 
 .sd-muted { color: var(--sd-muted); }
 
-.sd-editor [hidden] { display: none !important; }
+/* An element with the hidden attribute stays hidden even where a component's
+   own rule sets its display: the repeated [hidden] outranks those rules (none
+   has more than three classes), so no priority flag is needed. */
+.sd-editor [hidden][hidden][hidden] { display: none; }
 
-.sd-visually-hidden {
-  position: absolute !important;
+.sd-visually-hidden.sd-visually-hidden {
+  position: absolute;
+  margin: -1px;
+  padding: 0;
+  border: 0;
   width: 1px;
   height: 1px;
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* Obsidian shows an element's aria-label as a tooltip on hover. The large
+   areas are labelled for screen readers, not for a tooltip that follows the
+   pointer around, and on an <svg> Obsidian's tooltip fails. --no-tooltip is
+   Obsidian's own switch (a web page ignores it); what is inside these areas,
+   such as their buttons, keeps its tooltips. */
+.sd-stage,
+.sd-code-input,
+.sd-notes-panel,
+.sd-timeline,
+.sd-embed-svg {
+  --no-tooltip: true;
+}
+
+.sd-stage *,
+.sd-notes-panel *,
+.sd-timeline * {
+  --no-tooltip: false;
 }
 
 /* ------------------------------------------------------------ controls */
@@ -125,7 +150,7 @@
 }
 
 .sd-editor .sd-btn.sd-primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--sd-accent) 88%, black);
+  background: color-mix(in srgb, var(--sd-accent) 88%, #000);
   color: var(--sd-on-accent);
 }
 
@@ -307,6 +332,7 @@
   text-align: right;
   color: var(--sd-faint);
   user-select: none;
+  -webkit-user-select: none;
   will-change: transform;
 }
 
@@ -404,10 +430,19 @@
 .sd-tok-punct { color: var(--sd-muted); }
 .sd-tok-comment { color: var(--sd-faint); font-style: italic; }
 
+/* A squiggle under the problem, in the theme's color: two diagonal stripes
+   that meet at the edges of each 4 x 2 px tile draw the zigzag (wavy underline
+   styles are only partly supported in Obsidian's oldest supported versions).
+   The bottom padding puts it just under the descenders without moving a line;
+   no side padding, which would shift the text against the textarea. */
 .sd-tok-error {
-  text-decoration: underline wavy var(--sd-removed);
-  text-decoration-skip-ink: none;
-  text-underline-offset: 3px;
+  padding-bottom: 2px;
+  background-image:
+    linear-gradient(135deg, transparent 24%, var(--sd-removed) 24% 43%, transparent 43%),
+    linear-gradient(45deg, transparent 57%, var(--sd-removed) 57% 76%, transparent 76%);
+  background-position: 0 100%;
+  background-repeat: repeat-x;
+  background-size: 4px 2px;
 }
 
 .sd-code.is-readonly .sd-code-body {
@@ -909,7 +944,7 @@
 .sd-node.is-changed .sd-node-badge circle { fill: var(--sd-changed); }
 
 .sd-node-badge text {
-  fill: white;
+  fill: #fff;
   font-size: 12px;
   font-weight: 700;
   text-anchor: middle;
@@ -993,7 +1028,7 @@
 }
 
 .sd-editor .sd-handle:hover {
-  background: color-mix(in srgb, var(--sd-accent) 85%, black);
+  background: color-mix(in srgb, var(--sd-accent) 85%, #000);
 }
 
 .sd-editor .sd-handle.sd-anchor-right:hover { transform: translate(10px, -50%) scale(1.12); }
@@ -1329,7 +1364,7 @@
   pointer-events: none;
 }
 
-.sd-toast.is-error { background: var(--sd-removed); color: white; }
+.sd-toast.is-error { background: var(--sd-removed); color: #fff; }
 
 /* --------------------------------------------------- read-only diagram */
 

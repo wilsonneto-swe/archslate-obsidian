@@ -1,7 +1,9 @@
 # Development
 
 Node.js 22 or later (`.nvmrc` has the version CI uses). There are no runtime dependencies; the development ones
-are esbuild (the builds) and eslint with Obsidian's review rules (the lint).
+are esbuild (the builds) and eslint with Obsidian's review rules (the lint). The code is plain JavaScript with
+JSDoc types, the shared shapes in `packages/types.d.ts`: the lint checks them with type information, as the
+community directory's scan does, and `npx tsc --noEmit` reads them too.
 
 ```
 npm install

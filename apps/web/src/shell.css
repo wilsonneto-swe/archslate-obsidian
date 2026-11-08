@@ -149,7 +149,7 @@ body {
 }
 
 .shell-button.is-primary:hover {
-  background: color-mix(in srgb, var(--interactive-accent) 85%, black);
+  background: color-mix(in srgb, var(--interactive-accent) 85%, #000);
   color: var(--text-on-accent);
 }
 

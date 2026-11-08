@@ -5,12 +5,24 @@
 // group are costs, so the search prefers clean routes without being forbidden
 // from taking an ugly one when nothing else exists.
 
+/** @typedef {import('../types').Point} Point */
+/** @typedef {import('../types').Rect} Rect */
+/** @typedef {import('../types').GroupBox} GroupBox */
+/** @typedef {import('../types').RouteInput} RouteInput */
+/** @typedef {import('../types').RoutingOptions} RoutingOptions */
+
 const E = 0;
 const S = 1;
 const W = 2;
 const N = 3;
 const DX = [1, 0, -1, 0];
 const DY = [0, 1, 0, -1];
+
+/**
+ * E, S, W or N: a side of a component, or a direction of travel (an index into
+ * DX and DY).
+ * @typedef {0 | 1 | 2 | 3} Side
+ */
 
 const COST = {
   bend: 22,
@@ -21,6 +33,7 @@ const COST = {
   groupTitlePerPx: 6,
 };
 
+/** @type {RoutingOptions} */
 export const ROUTING_DEFAULTS = {
   clearance: 10,
   stub: 14,
@@ -32,8 +45,8 @@ export const ROUTING_DEFAULTS = {
 
 class MinHeap {
   constructor() {
-    this.keys = [];
-    this.values = [];
+    /** @type {number[]} */ this.keys = [];
+    /** @type {number[]} */ this.values = [];
   }
 
   clear() {
@@ -45,7 +58,7 @@ class MinHeap {
     return this.keys.length;
   }
 
-  push(key, value) {
+  push(/** @type {number} */ key, /** @type {number} */ value) {
     const { keys, values } = this;
     let i = keys.length;
     keys.push(key);
@@ -65,7 +78,7 @@ class MinHeap {
   pop() {
     const { keys, values } = this;
     const value = values[0];
-    this.lastKey = keys[0];
+    /** @type {number} */ this.lastKey = keys[0];
     const key = keys.pop();
     const val = values.pop();
     const n = keys.length;
@@ -87,6 +100,13 @@ class MinHeap {
   }
 }
 
+/**
+ * The side of `a` a link leaves by and the side of `b` it enters by.
+ * @param {Rect} a
+ * @param {Rect} b
+ * @param {boolean} horizontal
+ * @returns {[Side, Side]}
+ */
 function chooseSides(a, b, horizontal) {
   const right = b.x >= a.x + a.w;
   const left = b.x + b.w <= a.x;
@@ -106,8 +126,20 @@ function chooseSides(a, b, horizontal) {
   return [E, W];
 }
 
+/**
+ * @param {Side} side
+ * @returns {boolean}
+ */
 const isVerticalSide = (side) => side === E || side === W;
 
+/**
+ * The point at `along` on one side of `rect` (a y on the east and west sides,
+ * an x on the others).
+ * @param {Rect} rect
+ * @param {Side} side
+ * @param {number} along
+ * @returns {Point}
+ */
 function sidePoint(rect, side, along) {
   switch (side) {
     case E:
@@ -121,14 +153,63 @@ function sidePoint(rect, side, along) {
   }
 }
 
+/**
+ * The middle of one side of `rect`, as a coordinate along that side.
+ * @param {Rect} rect
+ * @param {Side} side
+ * @returns {number}
+ */
 const centerAlong = (rect, side) => {
   return isVerticalSide(side) ? rect.y + rect.h / 2 : rect.x + rect.w / 2;
 };
 
+/**
+ * A link between two different components. routeEdges() plans which side of
+ * each component it leaves and enters, its place among the links (`index`,
+ * which breaks ties) and how far apart the two centers are (`distance`: short
+ * links are routed first). assignPorts() adds the rest: where along each side
+ * it attaches and how many link ends share that side, its end points on the
+ * components, and the stubs just off them where the search starts and ends.
+ * @typedef {{
+ *   key: string,
+ *   from: string,
+ *   to: string,
+ *   index: number,
+ *   sourceSide: Side,
+ *   targetSide: Side,
+ *   distance: number,
+ *   sourceAlong?: number,
+ *   sourceCount?: number,
+ *   targetAlong?: number,
+ *   targetCount?: number,
+ *   start?: Point,
+ *   end?: Point,
+ *   startStub?: Point,
+ *   endStub?: Point,
+ * }} RoutePlan
+ */
+
+/**
+ * One end of a link on a side of a component, while ports are assigned.
+ * @typedef {{ plan: RoutePlan, end: 'source' | 'target' }} PortEntry
+ */
+
 // Spreads links arriving on the same side of a node, ordered by where each one
 // is going so they do not cross right at the node.
+/**
+ * @param {RoutePlan[]} plans
+ * @param {Map<string, Rect>} rects
+ * @param {RoutingOptions} cfg
+ */
 function assignPorts(plans, rects, cfg) {
+  /** @type {Map<string, { id: string, side: Side, entries: PortEntry[] }>} */
   const sides = new Map();
+  /**
+   * @param {string} id
+   * @param {Side} side
+   * @param {RoutePlan} plan
+   * @param {'source' | 'target'} end
+   */
   const register = (id, side, plan, end) => {
     const key = `${id}:${side}`;
     if (!sides.has(key)) sides.set(key, { id, side, entries: [] });
@@ -141,7 +222,7 @@ function assignPorts(plans, rects, cfg) {
 
   for (const { id, side, entries } of sides.values()) {
     const rect = rects.get(id);
-    const otherCenter = ({ plan, end }) => {
+    const otherCenter = (/** @type {PortEntry} */ { plan, end }) => {
       return centerAlong(rects.get(end === 'source' ? plan.to : plan.from), side);
     };
     entries.sort((a, b) => otherCenter(a) - otherCenter(b) || a.plan.index - b.plan.index);
@@ -170,6 +251,10 @@ function assignPorts(plans, rects, cfg) {
     const a = rects.get(plan.from);
     const b = rects.get(plan.to);
     const vertical = isVerticalSide(plan.sourceSide);
+    /**
+     * @param {Rect} rect
+     * @returns {[number, number]}
+     */
     const range = (rect) => {
       const start = vertical ? rect.y : rect.x;
       const size = vertical ? rect.h : rect.w;
@@ -209,8 +294,14 @@ function assignPorts(plans, rects, cfg) {
 
 // Extra parallel channels inside gaps, so links can run side by side. Capped per
 // gap: wide empty areas need a few lanes, not a dense mesh.
+/**
+ * @param {number[]} sorted
+ * @param {number} spacing
+ * @param {number} [maxLanes]
+ * @returns {number[]}
+ */
 function fillLines(sorted, spacing, maxLanes = 6) {
-  const out = [];
+  /** @type {number[]} */ const out = [];
   for (let i = 0; i < sorted.length; i += 1) {
     out.push(sorted[i]);
     const gap = sorted[i + 1] - sorted[i];
@@ -222,6 +313,12 @@ function fillLines(sorted, spacing, maxLanes = 6) {
   return out;
 }
 
+/**
+ * The index of the first of the sorted `values` that is not below `target`.
+ * @param {number[]} values
+ * @param {number} target
+ * @returns {number}
+ */
 function lowerBound(values, target) {
   let lo = 0;
   let hi = values.length;
@@ -233,15 +330,62 @@ function lowerBound(values, target) {
   return lo;
 }
 
+/**
+ * The search space, and the search's scratch arrays. Grid lines run along every
+ * component and group at the clearance, through every end point and stub, and
+ * around everything at the margin, with extra lanes in wide gaps (`xs` and `ys`,
+ * sorted). Vertex `ix + iy * nx` is where the lines at xs[ix] and ys[iy] meet.
+ * The `block`, `group`, `title` and `used` arrays come in pairs: H for the step
+ * from a vertex to the next one on the right, V for the step to the next one
+ * below, both indexed by the step's first vertex. `block` is 1 where a component
+ * is in the way, `group` has a bit for each of the first 31 groups the step runs
+ * inside, `title` is 1 where it runs through a group's title, and `used` counts
+ * the routed links already on it. `passH` and `passV` are per vertex: 1 where a
+ * routed link already runs through it horizontally or vertically, or where a
+ * stub is reserved. `gScore`, `parent`, `stamp` (the search that last set those
+ * two) and `closed` (the search that expanded the state) are per search state,
+ * `vertex * 4 + direction of travel`; `generation` numbers the searches, so
+ * those arrays never need clearing, and `heap` is the open set.
+ * @typedef {{
+ *   xs: number[],
+ *   ys: number[],
+ *   nx: number,
+ *   ny: number,
+ *   blockH: Uint8Array,
+ *   blockV: Uint8Array,
+ *   groupH: Int32Array,
+ *   groupV: Int32Array,
+ *   titleH: Uint8Array,
+ *   titleV: Uint8Array,
+ *   usedH: Uint16Array,
+ *   usedV: Uint16Array,
+ *   passH: Uint8Array,
+ *   passV: Uint8Array,
+ *   gScore: Float64Array,
+ *   stamp: Int32Array,
+ *   closed: Int32Array,
+ *   parent: Int32Array,
+ *   generation: number,
+ *   heap: MinHeap,
+ * }} Grid
+ */
+
+/**
+ * @param {Map<string, Rect>} rects
+ * @param {GroupBox[]} groups
+ * @param {RoutePlan[]} plans
+ * @param {RoutingOptions} cfg
+ * @returns {Grid}
+ */
 function buildGrid(rects, groups, plans, cfg) {
-  const xset = new Set();
-  const yset = new Set();
+  /** @type {Set<number>} */ const xset = new Set();
+  /** @type {Set<number>} */ const yset = new Set();
   const c = cfg.clearance;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  const extend = (r) => {
+  const extend = (/** @type {Rect} */ r) => {
     minX = Math.min(minX, r.x);
     minY = Math.min(minY, r.y);
     maxX = Math.max(maxX, r.x + r.w);
@@ -267,7 +411,7 @@ function buildGrid(rects, groups, plans, cfg) {
   xset.add(minX - cfg.margin).add(maxX + cfg.margin);
   yset.add(minY - cfg.margin).add(maxY + cfg.margin);
 
-  const byNumber = (a, b) => a - b;
+  const byNumber = (/** @type {number} */ a, /** @type {number} */ b) => a - b;
   const xs = fillLines([...xset].sort(byNumber), cfg.channel);
   const ys = fillLines([...yset].sort(byNumber), cfg.channel);
   const nx = xs.length;
@@ -299,6 +443,12 @@ function buildGrid(rects, groups, plans, cfg) {
   const groupV = new Int32Array(cells);
   const titleH = new Uint8Array(cells);
   const titleV = new Uint8Array(cells);
+  /**
+   * @param {Rect} r
+   * @param {number} bit
+   * @param {Int32Array | Uint8Array} maskH
+   * @param {Int32Array | Uint8Array} maskV
+   */
   const paint = (r, bit, maskH, maskV) => {
     const ix0 = lowerBound(xs, r.x);
     const ix1 = lowerBound(xs, r.x + r.w);
@@ -348,10 +498,20 @@ function buildGrid(rects, groups, plans, cfg) {
   };
 }
 
+/**
+ * @param {Grid} grid
+ * @param {Point} point
+ * @returns {number}
+ */
 function vertexAt(grid, point) {
   return lowerBound(grid.xs, point.x) + lowerBound(grid.ys, point.y) * grid.nx;
 }
 
+/**
+ * How many bits of a 32-bit integer are set.
+ * @param {number} value
+ * @returns {number}
+ */
 function bitCount(value) {
   let v = value - ((value >>> 1) & 0x55555555);
   v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
@@ -359,6 +519,14 @@ function bitCount(value) {
 }
 
 // `foreignMask` has a bit set for every group the link does not belong to.
+/**
+ * The cheapest route's vertices from the start stub to the end stub, or null
+ * when nothing reaches the end.
+ * @param {Grid} grid
+ * @param {RoutePlan} plan
+ * @param {number} foreignMask
+ * @returns {number[] | null}
+ */
 function findPath(grid, plan, foreignMask) {
   const { xs, ys, nx, ny, blockH, blockV, usedH, usedV, passH, passV } = grid;
   const { groupH, groupV, titleH, titleV } = grid;
@@ -372,6 +540,10 @@ function findPath(grid, plan, foreignMask) {
   const goalY = plan.endStub.y;
   const arrival = (plan.targetSide + 2) % 4;
 
+  /**
+   * @param {number} x
+   * @param {number} y
+   */
   const heuristic = (x, y) => Math.abs(x - goalX) + Math.abs(y - goalY);
 
   heap.clear();
@@ -440,12 +612,18 @@ function findPath(grid, plan, foreignMask) {
 
   if (best < 0) return null;
 
-  const vertices = [];
+  /** @type {number[]} */ const vertices = [];
   for (let state = best; state >= 0; state = parent[state]) vertices.push(state >> 2);
   vertices.reverse();
   return vertices;
 }
 
+/**
+ * Records a found route on the grid: the steps it takes and the vertices it
+ * runs through.
+ * @param {Grid} grid
+ * @param {number[]} vertices
+ */
 function markRoute(grid, vertices) {
   const { nx } = grid;
   for (let i = 1; i < vertices.length; i += 1) {
@@ -468,7 +646,16 @@ function markRoute(grid, vertices) {
 }
 
 // Other links should treat the short stub next to a node as already taken.
+/**
+ * @param {Grid} grid
+ * @param {RoutePlan[]} plans
+ * @param {RoutingOptions} cfg
+ */
 function reserveStubs(grid, plans, cfg) {
+  /**
+   * @param {Point} point
+   * @param {Side} side
+   */
   const reserve = (point, side) => {
     for (const distance of [cfg.clearance, cfg.stub]) {
       const v = vertexAt(grid, {
@@ -485,8 +672,13 @@ function reserveStubs(grid, plans, cfg) {
   }
 }
 
+/**
+ * Drops repeated points and the middle of straight runs.
+ * @param {Point[]} points
+ * @returns {Point[]}
+ */
 export function simplifyPoints(points) {
-  const out = [];
+  /** @type {Point[]} */ const out = [];
   for (const point of points) {
     const last = out.at(-1);
     if (last && last.x === point.x && last.y === point.y) continue;
@@ -506,6 +698,11 @@ export function simplifyPoints(points) {
 // A link from a component to itself: out of one side, over the top, back in.
 // Left to right it uses the right side; top to bottom the component's sticky
 // notes sit on its right, so the loop takes the left side.
+/**
+ * @param {Rect} rect
+ * @param {boolean} [horizontal]
+ * @returns {Point[]}
+ */
 function selfLoop(rect, horizontal = true) {
   const reach = 22;
   const y0 = rect.y + rect.h / 2 - 8;
@@ -522,10 +719,16 @@ function selfLoop(rect, horizontal = true) {
 }
 
 // `ancestorsOf(nodeId)` returns the ids of the groups containing that node.
+/**
+ * Each link's route, by key.
+ * @param {RouteInput} input
+ * @param {Partial<RoutingOptions>} [options]
+ * @returns {Map<string, Point[]>}
+ */
 export function routeEdges({ rects, groups, edges, ancestorsOf, horizontal }, options = {}) {
   const cfg = { ...ROUTING_DEFAULTS, ...options };
-  const routes = new Map();
-  const plans = [];
+  /** @type {Map<string, Point[]>} */ const routes = new Map();
+  /** @type {RoutePlan[]} */ const plans = [];
 
   edges.forEach((edge, index) => {
     if (edge.from === edge.to) {

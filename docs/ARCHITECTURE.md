@@ -14,6 +14,7 @@ packages/
     flows.js           the numbered walkthrough view of one flow
     document.js        the note format: the block, the notes, the versions comment
     kinds.js           component types and link operators
+  types.d.ts           the shared data shapes, for the JSDoc types in both packages and the plugin
   ui/                  the editor, DOM only, host-agnostic
     editor.js          DiagramEditor: the text, its history, the versions, the view state
     canvas.js          pan and zoom, selection, (+) handles, toolbars, popovers, keys

@@ -6,6 +6,15 @@ import { el, viewOf } from './dom.js';
 import { icon } from './icons.js';
 import { isComposing, modKey } from './keys.js';
 
+/** @typedef {import('../types').Snapshot} Snapshot */
+/** @typedef {import('./editor.js').DiagramEditor} DiagramEditor */
+/** @typedef {import('../types').TimelineMode} TimelineMode */
+
+/**
+ * "Nov 8, 05:30 PM" in the user's locale; '' for a date that does not parse.
+ * @param {string} iso
+ * @returns {string}
+ */
 const formatDate = (iso) => {
   const date = new Date(iso);
   return Number.isNaN(date.getTime())
@@ -14,22 +23,33 @@ const formatDate = (iso) => {
 };
 
 export class Timeline {
-  constructor(editor) {
+  constructor(/** @type {DiagramEditor} */ editor) {
     this.editor = editor;
+    /** @type {TimelineMode | null} */
     this.mode = null; // { type: 'save' } | { type: 'rename', id }
+    /**
+     * The version whose delete button waits for a second click.
+     * @type {string | null}
+     */
     this.pendingDelete = null;
     // Where focus goes back to when the form closes (the source, the canvas...).
+    /** @type {HTMLElement | SVGElement | null} */
     this.returnFocus = null;
     this.root = el('footer', { class: 'sd-timeline', 'aria-label': 'Versions' });
   }
 
   // The form takes focus when it opens, and only then: the timeline is drawn
   // again on every edit, and a form left open must not pull focus back.
-  openForm(mode) {
+  openForm(/** @type {TimelineMode} */ mode) {
+    /**
+     * What has focus: an HTML or SVG element (the elements that can take it).
+     * @type {HTMLElement | SVGElement | null}
+     */
     const active = this.root.ownerDocument.activeElement;
     this.returnFocus = active && !this.root.contains(active) ? active : null;
     this.mode = mode;
     this.update(true);
+    /** @type {HTMLInputElement | null} */
     const input = this.root.querySelector('.sd-tl-form input');
     input?.focus();
     input?.select();
@@ -40,7 +60,7 @@ export class Timeline {
     this.openForm({ type: 'save' });
   }
 
-  closeForm({ refocus = true } = {}) {
+  closeForm(/** @type {{ refocus?: boolean }} */ { refocus = true } = {}) {
     if (!this.mode) return;
     this.mode = null;
     this.update(true);
@@ -57,7 +77,7 @@ export class Timeline {
     this.returnFocus = null;
   }
 
-  inlineInput({ value, placeholder, submitLabel, onSubmit }) {
+  inlineInput(/** @type {{ value: string, placeholder: string, submitLabel: string, onSubmit: (name: string) => void }} */ { value, placeholder, submitLabel, onSubmit }) {
     const input = el('input', { class: 'sd-input', value, placeholder, 'aria-label': placeholder });
     const close = () => this.closeForm();
     const form = el(
@@ -89,7 +109,7 @@ export class Timeline {
     return form;
   }
 
-  update(force = false) {
+  update(/** @type {boolean} */ force = false) {
     const active = this.root.ownerDocument.activeElement;
     if (!force && this.root.contains(active) && active.tagName === 'INPUT') return;
 
@@ -158,7 +178,7 @@ export class Timeline {
     this.root.querySelector('.sd-tl-item.is-active')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }
 
-  item(snapshot, active, isBase) {
+  item(/** @type {Snapshot} */ snapshot, /** @type {boolean} */ active, /** @type {boolean} */ isBase) {
     const { editor } = this;
     if (this.mode?.type === 'rename' && this.mode.id === snapshot.id) {
       return el(
@@ -205,7 +225,7 @@ export class Timeline {
                 this.pendingDelete = snapshot.id;
                 this.update(true);
                 // The confirm button replaces this one: keep the keyboard on it.
-                this.root.querySelector('.sd-danger.is-confirming')?.focus();
+                /** @type {HTMLButtonElement | null} */ (this.root.querySelector('.sd-danger.is-confirming'))?.focus();
                 viewOf(this.root).setTimeout(() => {
                   if (this.pendingDelete === snapshot.id) {
                     this.pendingDelete = null;

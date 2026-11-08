@@ -27,11 +27,32 @@ import { patchMethod } from './patch.js';
 import { DiagramView } from './view.js';
 import { ViewStateStore } from './view-state.js';
 
+/** @typedef {import('obsidian').PaneType} PaneType */
+/** @typedef {import('../../../packages/ui/editor.js').DiagramEditor} DiagramEditor */
+/** @typedef {import('../../../packages/types').OpenChoice} OpenChoice */
+/** @typedef {import('../../../packages/types').ViewState} ViewState */
+
+/**
+ * A state a tab (leaf) is asked to show: the view type and its own state (`state.file` for a note).
+ * @typedef {import('obsidian').ViewState} LeafState
+ */
+
+/**
+ * The plugin's data as loadData() reads it back from data.json: what was saved,
+ * or an older shape, a hand edit (ViewStateStore checks every view state).
+ * @typedef {import('../../../packages/types').StoredPluginData} StoredPluginData
+ */
+
 const DATA_SAVE_MS = 1500;
 
 // Lines compared without their indentation or trailing spaces.
+/**
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
 const sameSource = (a, b) => {
-  const norm = (text) => text.replace(/\r/g, '').split('\n').map((line) => line.trim()).join('\n').trim();
+  const norm = (/** @type {string} */ text) => text.replace(/\r/g, '').split('\n').map((line) => line.trim()).join('\n').trim();
   return norm(a) === norm(b);
 };
 
@@ -39,7 +60,7 @@ const sameSource = (a, b) => {
 // note in the editor; one inside a callout or a list, or a second block, is
 // only drawn (opening the note would show the other block, or none).
 class DiagramBlock extends MarkdownRenderChild {
-  constructor(containerEl, source, plugin, sourcePath) {
+  constructor(/** @type {HTMLElement} */ containerEl, /** @type {string} */ source, /** @type {ArchslatePlugin} */ plugin, /** @type {string} */ sourcePath) {
     super(containerEl);
     this.source = source;
     this.plugin = plugin;
@@ -65,9 +86,18 @@ class DiagramBlock extends MarkdownRenderChild {
 
 export default class ArchslatePlugin extends Plugin {
   async onload() {
+    /** @type {StoredPluginData} */
     const data = (await this.loadData()) ?? {};
     this.viewStates = new ViewStateStore(data.viewState);
+    /**
+     * What the user chose to open each note as, per tab: only for as long as the tab lives.
+     * @type {WeakMap<WorkspaceLeaf, Map<string, OpenChoice>>}
+     */
     this.choices = new WeakMap();
+    /**
+     * The pending save of the plugin's data.
+     * @type {number | null}
+     */
     this.dataTimer = null;
 
     this.registerView(VIEW_TYPE, (leaf) => new DiagramView(leaf, this));
@@ -104,6 +134,7 @@ export default class ArchslatePlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on('quit', (tasks) => {
         tasks.add(async () => {
+          /** @type {Promise<void>[]} */
           const saves = [];
           this.forEachDiagram((view) => {
             view.rememberViewState();
@@ -126,6 +157,13 @@ export default class ArchslatePlugin extends Plugin {
   // ---------------------------------------------------------------- commands
 
   registerCommands() {
+    /**
+     * A command on the diagram in the active tab, offered only when there is one.
+     * @param {string} id
+     * @param {string} name
+     * @param {string} icon
+     * @param {(view: DiagramView & { editor: DiagramEditor }) => void} run
+     */
     const diagramCommand = (id, name, icon, run) =>
       this.addCommand({
         id,
@@ -174,6 +212,11 @@ export default class ArchslatePlugin extends Plugin {
       },
     });
     // One command per direction, each offered only when it changes something.
+    /**
+     * @param {string} id
+     * @param {string} name
+     * @param {boolean} on
+     */
     const flagCommand = (id, name, on) =>
       this.addCommand({
         id,
@@ -270,24 +313,25 @@ export default class ArchslatePlugin extends Plugin {
     return view && file instanceof TFile && file.extension === 'md' ? { leaf: view.leaf, file } : null;
   }
 
-  choose(leaf, path, choice) {
+  choose(/** @type {WorkspaceLeaf} */ leaf, /** @type {string} */ path, /** @type {OpenChoice} */ choice) {
+    /** @type {Map<string, OpenChoice>} */
     const notes = this.choices.get(leaf) ?? new Map();
     notes.set(path, choice);
     this.choices.set(leaf, notes);
   }
 
   // The same note in another view: no history entry, the tab is focused.
-  async switchView(leaf, type, file) {
+  async switchView(/** @type {WorkspaceLeaf} */ leaf, /** @type {string} */ type, /** @type {TFile} */ file) {
     await leaf.setViewState({ type, state: { file: file.path }, active: true, popstate: true });
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
-  async openAsDiagram(leaf, file) {
+  async openAsDiagram(/** @type {WorkspaceLeaf} */ leaf, /** @type {TFile} */ file) {
     this.choose(leaf, file.path, 'diagram');
     await this.switchView(leaf, VIEW_TYPE, file);
   }
 
-  async openAsMarkdown(leaf) {
+  async openAsMarkdown(/** @type {WorkspaceLeaf} */ leaf) {
     const view = leaf.view;
     if (!(view instanceof DiagramView) || !view.file) return;
     const file = view.file;
@@ -298,6 +342,12 @@ export default class ArchslatePlugin extends Plugin {
 
   // AUTO-OPEN: setViewState hands a flagged note to the diagram view.
   patchLeaves() {
+    /**
+     * What `leaf` shows when asked for `state`: the same note in the diagram view when it opens as a diagram, `state` otherwise.
+     * @param {WorkspaceLeaf} leaf
+     * @param {LeafState} state
+     * @returns {LeafState}
+     */
     const stateFor = (leaf, state) => {
       const file = state?.state?.file;
       const path = typeof file === 'string' ? file : null;
@@ -314,24 +364,25 @@ export default class ArchslatePlugin extends Plugin {
     );
   }
 
-  isFlagged(file) {
+  isFlagged(/** @type {TFile} */ file) {
     return this.app.metadataCache.getFileCache(file)?.frontmatter?.[FLAG_KEY] === FLAG_VALUE;
   }
 
-  isFlaggedPath(path) {
+  isFlaggedPath(/** @type {string} */ path) {
     const file = this.app.vault.getAbstractFileByPath(path);
     return file instanceof TFile && file.extension === 'md' && this.isFlagged(file);
   }
 
   // ---------------------------------------------------------------- the flag
 
-  async setFlag(file, on) {
+  async setFlag(/** @type {TFile} */ file, /** @type {boolean} */ on) {
+    /** @type {Promise<void>[]} */
     const saves = [];
     this.forEachDiagram((view) => {
       if (view.file === file) saves.push(view.saveNow());
     });
     await Promise.all(saves);
-    await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+    await this.app.fileManager.processFrontMatter(file, (/** @type {Record<string, unknown>} */ frontmatter) => {
       if (on) frontmatter[FLAG_KEY] = FLAG_VALUE;
       else delete frontmatter[FLAG_KEY];
     });
@@ -342,7 +393,7 @@ export default class ArchslatePlugin extends Plugin {
 
   // --------------------------------------------------------------- new ones
 
-  async newDiagram(folder, where = false) {
+  async newDiagram(/** @type {TFolder | undefined} */ folder, /** @type {PaneType | boolean} */ where = false) {
     const parent = folder ?? this.app.fileManager.getNewFileParent(this.app.workspace.getActiveFile()?.path ?? '');
     const dir = parent.isRoot() ? '' : `${parent.path}/`;
     const name = untitledName((candidate) => this.app.vault.getAbstractFileByPath(normalizePath(`${dir}${candidate}.md`)) !== null, NEW_DIAGRAM_NAME);
@@ -352,7 +403,7 @@ export default class ArchslatePlugin extends Plugin {
 
   // ------------------------------------------------------------------ export
 
-  async saveExport(view, filename, blob) {
+  async saveExport(/** @type {DiagramView} */ view, /** @type {string} */ filename, /** @type {Blob} */ blob) {
     const path = await this.app.fileManager.getAvailablePathForAttachment(filename, view.file?.path ?? '');
     const file = /^(text\/|image\/svg)/.test(blob.type)
       ? await this.app.vault.create(path, await blob.text())
@@ -362,7 +413,7 @@ export default class ArchslatePlugin extends Plugin {
 
   // -------------------------------------------------------------- view state
 
-  keepViewState(path, state) {
+  keepViewState(/** @type {string} */ path, /** @type {ViewState} */ state) {
     if (this.viewStates.set(path, state)) this.scheduleData();
   }
 
@@ -377,7 +428,7 @@ export default class ArchslatePlugin extends Plugin {
     await this.saveData({ viewState: this.viewStates.toJSON() });
   }
 
-  forEachDiagram(run) {
+  forEachDiagram(/** @type {(view: DiagramView) => void} */ run) {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
       if (leaf.view instanceof DiagramView) run(leaf.view);
     }

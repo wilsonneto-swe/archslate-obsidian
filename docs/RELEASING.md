@@ -43,5 +43,9 @@ What the directory and its review look at:
   Node.js or Electron APIs in the plugin); `fundingUrl` only because sponsorship is accepted.
 - No `innerHTML`, no default hotkeys, no plugin id in command ids, no sample code, no client-side telemetry, no
   network requests (the README's Privacy section says so).
-- `npm run lint` applies `eslint-plugin-obsidianmd`'s recommended rules, the review's own, to the code that runs in
-  Obsidian.
+- `npm run lint` applies the review's rules to the code that runs in Obsidian: `eslint-plugin-obsidianmd`'s
+  recommended rules, and typescript-eslint's type-checked recommended rules, which the directory's source scan
+  uses. The code is JavaScript typed with JSDoc comments (the shared shapes are in `packages/types.d.ts`), so
+  those rules see real types rather than `any`.
+- The directory also lints every stylesheet in the repository with stylelint: features Obsidian's Electron
+  supports, no `!important`, no named colours.

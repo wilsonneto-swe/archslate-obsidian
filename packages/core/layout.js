@@ -13,6 +13,143 @@
 import { KINDS } from './kinds.js';
 import { routeEdges, ROUTING_DEFAULTS } from './routing.js';
 
+/** @typedef {import('../types').RenderModel} RenderModel */
+/** @typedef {import('../types').RenderEdge} RenderEdge */
+/** @typedef {import('../types').RenderGroup} RenderGroup */
+/** @typedef {import('../types').RenderNote} RenderNote */
+/** @typedef {import('../types').Layout} Layout */
+/** @typedef {import('../types').LayoutOptions} LayoutOptions */
+/** @typedef {import('../types').TextStyle} TextStyle */
+/** @typedef {import('../types').TextMeasurer} TextMeasurer */
+/** @typedef {import('../types').Point} Point */
+/** @typedef {import('../types').Rect} Rect */
+/** @typedef {import('../types').NodeBox} NodeBox */
+/** @typedef {import('../types').GroupBox} GroupBox */
+/** @typedef {import('../types').EdgeLabelBox} EdgeLabelBox */
+/** @typedef {import('../types').EdgeLayout} EdgeLayout */
+/** @typedef {import('../types').NoteBlock} NoteBlock */
+/** @typedef {import('../types').NoteBlockItem} NoteBlockItem */
+/** @typedef {import('../types').NoteColumn} NoteColumn */
+
+/**
+ * The spacing constants with the caller's overrides, and the other options.
+ * @typedef {typeof DEFAULTS & LayoutOptions} LayoutConfig
+ */
+
+/**
+ * A component's card before it is placed: its size, its fitted texts and its notes.
+ * @typedef {Omit<NodeBox, 'id' | 'x' | 'y'>} CardBox
+ */
+
+/**
+ * A link label's size and texts before it is placed.
+ * @typedef {Omit<EdgeLabelBox, 'x' | 'y'>} LabelSize
+ */
+
+/**
+ * A point in layer space, for scoring an order: [layer, position across the flow].
+ * @typedef {[number, number]} LayerPoint
+ */
+
+/**
+ * Which neighbours reorderByBarycenter() sorts a container's children by the
+ * average position of: those in earlier layers, the others, or all of them.
+ * @typedef {'pred' | 'succ' | 'both'} OrderMode
+ */
+
+/**
+ * A component: its card and, across the flow from it, its sticky notes.
+ * @typedef NodeUnit
+ * @property {'node'} type
+ * @property {string} id The component's id.
+ * @property {number} line Its source line: a container's children start in source order.
+ * @property {ContainerUnit} parent
+ * @property {undefined} [children] Never set: code reads `children` from any unit.
+ * @property {string[]} leaves The ids of the components in the unit: its own.
+ * @property {number} layerMin Its layer.
+ * @property {number} layerMax Its layer.
+ * @property {number} cardCross The card's size across the flow.
+ * @property {number} cardMain The card's size along the flow.
+ * @property {number} size Its size across the flow: the card and its notes.
+ * @property {number} mainSize Its size along the flow: the card's or its notes', the larger.
+ * @property {number} offset Where it starts across the flow, from its parent's inner start.
+ * @property {Map<string, number>} [centers] arrange(): the card's center across the flow, from the unit's start, by component id.
+ * @property {number} [crossStart] placeCross(): where it starts across the flow.
+ * @property {number} [mainMin] placeRects(): where it starts along the flow.
+ * @property {number} [mainMax] placeRects(): where it ends along the flow.
+ */
+
+/**
+ * A group: a rigid block of its members inside a padded box. The title is at the
+ * top of the box, and the padding on that side makes room for it.
+ * @typedef GroupUnit
+ * @property {'group'} type
+ * @property {string} id The group's id.
+ * @property {number} line Its source line.
+ * @property {ContainerUnit} parent Linked by buildTree() once every group has a unit.
+ * @property {ChildUnit[]} children Its components and groups.
+ * @property {number} offset Where it starts across the flow, from its parent's inner start.
+ * @property {number} size Its size across the flow (arrange()).
+ * @property {number} titleWidth The width its title needs.
+ * @property {number} minCross Its least size across the flow: the title's width when the title runs across.
+ * @property {number} crossPadStart The padding inside its box before its members, across the flow.
+ * @property {number} crossPadEnd The padding inside its box after its members, across the flow.
+ * @property {number} mainPadStart The padding inside its box before its members, along the flow.
+ * @property {number} mainPadEnd The padding inside its box after its members, along the flow.
+ * @property {string[]} [leaves] The ids of all the components inside it.
+ * @property {number} [layerMin] The first layer of the components inside it.
+ * @property {number} [layerMax] The last layer of the components inside it.
+ * @property {boolean} [empty] True when no component is inside it: it takes its parent's first layer.
+ * @property {Map<string, number>} [centers] arrange(): each card's center across the flow, from the group's start, by component id.
+ * @property {number} [crossStart] placeCross(): where it starts across the flow.
+ * @property {number} [mainMin] placeRects(): where its box starts along the flow.
+ * @property {number} [mainMax] placeRects(): where its box ends along the flow.
+ */
+
+/**
+ * The top of the tree: the components and groups declared at the top level.
+ * @typedef RootUnit
+ * @property {'root'} type
+ * @property {null} parent
+ * @property {ChildUnit[]} children
+ * @property {undefined} [minCross] Never set, like the paddings: the root has no box.
+ * @property {undefined} [crossPadStart]
+ * @property {undefined} [crossPadEnd]
+ * @property {string[]} [leaves] The ids of all the components.
+ * @property {number} [layerMin] The first layer.
+ * @property {number} [layerMax] The last layer.
+ * @property {boolean} [empty] True when the diagram has no components.
+ * @property {number} [size] arrange(): the size of everything across the flow.
+ * @property {Map<string, number>} [centers] arrange(): each card's center across the flow, by component id.
+ * @property {number} [crossStart] placeCross(): 0.
+ */
+
+/**
+ * A unit inside the root or a group.
+ * @typedef {GroupUnit | NodeUnit} ChildUnit
+ */
+
+/**
+ * A unit with children: the root or a group.
+ * @typedef {RootUnit | GroupUnit} ContainerUnit
+ */
+
+/**
+ * A unit of the tree the layout works on: the root, a unit per group and a unit
+ * per component. Sizes and positions are along the flow ("main") or across it
+ * ("cross"). buildTree() sets the fields that are not optional, and `leaves`,
+ * `layerMin`, `layerMax` and (on an empty container) `empty`; the passes after
+ * it fill in the rest.
+ * @typedef {RootUnit | GroupUnit | NodeUnit} Unit
+ */
+
+/**
+ * relaxChildren(): a link between two children of a container, seen from one
+ * of them: `own` is its component at this end, `otherLeaf` the component at the
+ * other end, inside the child `other`.
+ * @typedef {{ own: string, other: ChildUnit, otherLeaf: string }} ChildLink
+ */
+
 const DEFAULTS = {
   nodeHeight: 56,
   nodeTextX: 56,
@@ -43,6 +180,7 @@ const DEFAULTS = {
   maxNoteLines: 8,
 };
 
+/** @type {Record<TextStyle, number>} */
 const CHAR_WIDTH = {
   label: 7.3,
   caption: 5.4,
@@ -56,6 +194,11 @@ const CHAR_WIDTH = {
 };
 
 // Used when no real text metrics are available (tests, headless).
+/**
+ * @param {string} text
+ * @param {TextStyle} style
+ * @returns {number}
+ */
 export function estimateTextWidth(text, style) {
   return text.length * (CHAR_WIDTH[style] ?? 7);
 }
@@ -63,10 +206,21 @@ export function estimateTextWidth(text, style) {
 // Whole characters as people see them: an emoji or an accented letter is never
 // cut in half (half an emoji is not even valid text for an SVG file).
 const segmenter = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
+/**
+ * @param {string} text
+ * @returns {string[]}
+ */
 const characters = (text) => (segmenter ? Array.from(segmenter.segment(text), (part) => part.segment) : Array.from(text));
 
 // The longest start of `text` that fits with "…" after it, found by halving:
 // a long label costs a few measurements, not one per character.
+/**
+ * @param {string} text
+ * @param {number} maxWidth
+ * @param {TextStyle} style
+ * @param {TextMeasurer} measure
+ * @returns {string}
+ */
 function fitText(text, maxWidth, style, measure) {
   if (measure(text, style) <= maxWidth) return text;
   const chars = characters(text);
@@ -81,8 +235,17 @@ function fitText(text, maxWidth, style, measure) {
 }
 
 // Greedy word wrap. Overlong words are cut, and text past `maxLines` ends in "…".
+/**
+ * @param {string} text
+ * @param {number} maxWidth
+ * @param {TextStyle} style
+ * @param {TextMeasurer} measure
+ * @param {number} maxLines
+ * @returns {string[]}
+ */
 function wrapText(text, maxWidth, style, measure, maxLines) {
   const words = text.split(/\s+/).filter(Boolean);
+  /** @type {string[]} */
   const lines = [];
   let current = '';
   for (const word of words) {
@@ -107,6 +270,11 @@ function wrapText(text, maxWidth, style, measure, maxLines) {
 
 // Size of an edge label: an optional step badge, the label, and details on a
 // second line.
+/**
+ * @param {RenderEdge} edge
+ * @param {TextMeasurer} measure
+ * @returns {LabelSize | null} null when the link shows no label.
+ */
 function labelSize(edge, measure) {
   const text = edge.displayLabel ?? edge.label ?? '';
   const propsText = edge.props?.length ? edge.props.join(' · ') : '';
@@ -119,11 +287,21 @@ function labelSize(edge, measure) {
   return { w, h: text && propsText ? 29 : 16, text, propsText, badge, badgeW };
 }
 
+/**
+ * Each component's neighbours along the links, by id, with the links that close
+ * a cycle turned around.
+ * @param {RenderModel} model
+ * @returns {{ successors: Map<string, string[]>, predecessors: Map<string, string[]> }}
+ */
 function buildAdjacency(model) {
+  /** @type {Map<string, string[]>} */
   const successors = new Map(model.nodes.map((n) => [n.id, []]));
+  /** @type {Map<string, string[]>} */
   const predecessors = new Map(model.nodes.map((n) => [n.id, []]));
 
+  /** @type {Map<string, string[]>} */
   const outgoing = new Map(model.nodes.map((n) => [n.id, []]));
+  /** @type {Set<string>} */
   const hasIncoming = new Set();
   for (const edge of model.edges) {
     if (edge.from === edge.to) continue;
@@ -133,7 +311,12 @@ function buildAdjacency(model) {
 
   // Depth-first from the sources. An edge closing a cycle is reversed for
   // layering only; it still draws in its real direction.
+  /**
+   * 1 while a component's successors are being visited, 2 once they all are.
+   * @type {Map<string, 1 | 2>}
+   */
   const state = new Map();
+  /** @param {string} id */
   const visit = (id) => {
     state.set(id, 1);
     for (const next of outgoing.get(id)) {
@@ -158,6 +341,11 @@ function buildAdjacency(model) {
   return { successors, predecessors };
 }
 
+/**
+ * Each component's layer along the flow (0, 1, 2... without gaps), by id.
+ * @param {RenderModel} model
+ * @returns {Map<string, number>}
+ */
 export function assignLayers(model) {
   const { successors, predecessors } = buildAdjacency(model);
   const ids = model.nodes.map((n) => n.id);
@@ -175,6 +363,11 @@ export function assignLayers(model) {
     }
   }
 
+  /**
+   * The lowest and highest layers a component can take without turning a link around.
+   * @param {string} id
+   * @returns {[number, number]}
+   */
   const slack = (id) => {
     const preds = predecessors.get(id);
     const succs = successors.get(id);
@@ -202,12 +395,21 @@ export function assignLayers(model) {
   }
 
   // Then use it to keep groups compact, deepest groups first.
+  /**
+   * The ids of the linked components inside each group, nested groups' included.
+   * @type {Map<string, string[]>}
+   */
   const descendants = new Map(model.groups.map((g) => [g.id, []]));
+  /** @param {string} id */
   const connected = (id) => predecessors.get(id).length + successors.get(id).length > 0;
   for (const node of model.nodes) {
     if (!connected(node.id)) continue;
     for (let g = node.group; g; g = model.groupById.get(g).parent) descendants.get(g).push(node.id);
   }
+  /**
+   * @param {RenderGroup} g
+   * @returns {number}
+   */
   const depth = (g) => (g.parent ? depth(model.groupById.get(g.parent)) + 1 : 0);
   const deepestFirst = [...model.groups].sort((a, b) => depth(b) - depth(a));
   for (let pass = 0; pass < 3; pass += 1) {
@@ -228,6 +430,7 @@ export function assignLayers(model) {
   // Unconnected nodes sit with their group's connected members, or at the start.
   for (const node of model.nodes) {
     if (connected(node.id)) continue;
+    /** @type {number | null} */
     let placed = null;
     for (let g = node.group; g && placed === null; g = model.groupById.get(g).parent) {
       const members = descendants.get(g);
@@ -243,8 +446,19 @@ export function assignLayers(model) {
   return layer;
 }
 
+/**
+ * @param {RenderModel} model
+ * @param {Map<string, number>} layers
+ * @param {Map<string, CardBox>} boxes
+ * @param {LayoutConfig} cfg
+ * @param {boolean} horizontal
+ * @param {TextMeasurer} measure
+ * @returns {RootUnit}
+ */
 function buildTree(model, layers, boxes, cfg, horizontal, measure) {
+  /** @type {RootUnit} */
   const root = { type: 'root', children: [], parent: null };
+  /** @type {Map<string, GroupUnit>} */
   const groupUnits = new Map();
 
   for (const group of model.groups) {
@@ -299,6 +513,7 @@ function buildTree(model, layers, boxes, cfg, horizontal, measure) {
     });
   }
 
+  /** @param {ContainerUnit} unit */
   const finish = (unit) => {
     unit.children.sort((a, b) => a.line - b.line);
     unit.leaves = [];
@@ -316,6 +531,10 @@ function buildTree(model, layers, boxes, cfg, horizontal, measure) {
   finish(root);
 
   // A group with nothing in it borrows a position from its parent.
+  /**
+   * @param {ContainerUnit} unit
+   * @param {number} fallback
+   */
   const settleEmpty = (unit, fallback) => {
     if (unit.leaves.length === 0) {
       unit.layerMin = fallback;
@@ -330,14 +549,29 @@ function buildTree(model, layers, boxes, cfg, horizontal, measure) {
   return root;
 }
 
+/**
+ * @param {ChildUnit} a
+ * @param {ChildUnit} b
+ * @returns {boolean}
+ */
 function spansOverlap(a, b) {
   return a.layerMin <= b.layerMax && b.layerMin <= a.layerMax;
 }
 
+/**
+ * @param {ChildUnit} a
+ * @param {ChildUnit} b
+ * @param {LayoutConfig} cfg
+ * @returns {number}
+ */
 function gapBetween(a, b, cfg) {
   return a.type === 'group' || b.type === 'group' ? cfg.blockGap : cfg.nodeGap;
 }
 
+/**
+ * @param {ContainerUnit} container
+ * @param {LayoutConfig} cfg
+ */
 function stackChildren(container, cfg) {
   const { children } = container;
   children.forEach((child, i) => {
@@ -354,14 +588,21 @@ function stackChildren(container, cfg) {
 
 // Slides rigid children toward the neighbours they link to, while keeping the
 // stacking order. Each pass ends in a valid arrangement.
+/**
+ * @param {ContainerUnit} container
+ * @param {RenderEdge[]} edges
+ * @param {LayoutConfig} cfg
+ */
 function relaxChildren(container, edges, cfg) {
   const { children } = container;
   if (children.length < 2) return;
 
+  /** @type {Map<string, ChildUnit>} */
   const owner = new Map();
   for (const child of children) {
     for (const leaf of child.leaves) owner.set(leaf, child);
   }
+  /** @type {Map<ChildUnit, ChildLink[]>} */
   const links = new Map(children.map((child) => [child, []]));
   for (const edge of edges) {
     const a = owner.get(edge.from);
@@ -371,6 +612,12 @@ function relaxChildren(container, edges, cfg) {
     links.get(b).push({ own: edge.to, other: a, otherLeaf: edge.from });
   }
 
+  /**
+   * The offset that lines the child's components up with the ones they link to,
+   * on average, or null when it has no links to its siblings.
+   * @param {ChildUnit} child
+   * @returns {number | null}
+   */
   const desiredOffset = (child) => {
     const list = links.get(child);
     if (list.length === 0) return null;
@@ -410,6 +657,12 @@ function relaxChildren(container, edges, cfg) {
 
 // Bottom-up: settles each group's interior, leaving it a rigid block with a known
 // size and known leaf positions for the level above to align against.
+/**
+ * @param {Unit} unit
+ * @param {RenderEdge[]} edges
+ * @param {LayoutConfig} cfg
+ * @param {boolean} relax
+ */
 function arrange(unit, edges, cfg, relax) {
   if (unit.type === 'node') {
     unit.centers = new Map([[unit.id, unit.cardCross / 2]]);
@@ -442,6 +695,13 @@ function arrange(unit, edges, cfg, relax) {
   }
 }
 
+/**
+ * Sets where each unit starts across the flow, and puts each card's center
+ * across the flow in `out`, by component id.
+ * @param {Unit} unit
+ * @param {number} base
+ * @param {Map<string, number>} out
+ */
 function placeCross(unit, base, out) {
   unit.crossStart = base;
   if (unit.type === 'node') {
@@ -452,7 +712,12 @@ function placeCross(unit, base, out) {
   for (const child of unit.children) placeCross(child, inner + child.offset, out);
 }
 
+/**
+ * @param {RootUnit} root
+ * @returns {ContainerUnit[]} The root and every group, parents before their children.
+ */
 function allContainers(root) {
+  /** @type {ContainerUnit[]} */
   const out = [root];
   for (let i = 0; i < out.length; i += 1) {
     for (const child of out[i].children) {
@@ -462,7 +727,20 @@ function allContainers(root) {
   return out;
 }
 
+/**
+ * @param {LayerPoint} a1
+ * @param {LayerPoint} a2
+ * @param {LayerPoint} b1
+ * @param {LayerPoint} b2
+ * @returns {boolean}
+ */
 function segmentsCross(a1, a2, b1, b2) {
+  /**
+   * @param {LayerPoint} p
+   * @param {LayerPoint} q
+   * @param {LayerPoint} r
+   * @returns {number}
+   */
   const side = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
   const d1 = side(b1, b2, a1);
   const d2 = side(b1, b2, a2);
@@ -471,7 +749,16 @@ function segmentsCross(a1, a2, b1, b2) {
   return d1 * d2 < 0 && d3 * d4 < 0;
 }
 
+/**
+ * How bad an order looks: crossings, links through components, long slants.
+ * @param {RenderEdge[]} edges
+ * @param {Map<string, number>} layers
+ * @param {Map<string, number>} centers
+ * @param {NodeUnit[]} leafUnits
+ * @returns {number}
+ */
 function scoreOrder(edges, layers, centers, leafUnits) {
+  /** @type {Array<[LayerPoint, LayerPoint]>} */
   const segments = edges
     .filter((e) => e.from !== e.to)
     .map((e) => [
@@ -501,7 +788,15 @@ function scoreOrder(edges, layers, centers, leafUnits) {
   return score;
 }
 
+/**
+ * @param {ContainerUnit[]} containers
+ * @param {RenderEdge[]} edges
+ * @param {Map<string, number>} layers
+ * @param {Map<string, number>} centers
+ * @param {OrderMode} mode
+ */
 function reorderByBarycenter(containers, edges, layers, centers, mode) {
+  /** @type {Map<string, string[]>} */
   const neighbours = new Map();
   for (const edge of edges) {
     if (edge.from === edge.to) continue;
@@ -512,6 +807,7 @@ function reorderByBarycenter(containers, edges, layers, centers, mode) {
   }
 
   for (const container of containers) {
+    /** @type {Map<ChildUnit, number>} */
     const weight = new Map();
     for (const child of container.children) {
       const own = new Set(child.leaves);
@@ -537,8 +833,15 @@ function reorderByBarycenter(containers, edges, layers, centers, mode) {
   }
 }
 
+/**
+ * @param {RootUnit} root
+ * @param {RenderEdge[]} edges
+ * @param {Map<string, number>} layers
+ * @param {LayoutConfig} cfg
+ */
 function optimizeOrder(root, edges, layers, cfg) {
   const containers = allContainers(root);
+  /** @type {NodeUnit[]} */
   const leafUnits = [];
   for (const container of containers) {
     for (const child of container.children) {
@@ -546,10 +849,16 @@ function optimizeOrder(root, edges, layers, cfg) {
     }
   }
 
+  /** @type {OrderMode[]} */
   const modes = ['pred', 'succ', 'both'];
+  /**
+   * The children of each container (as allContainers() lists them) in the best order so far.
+   * @type {ChildUnit[][] | null}
+   */
   let best = null;
   let bestScore = Infinity;
   for (let sweep = 0; sweep < cfg.orderSweeps; sweep += 1) {
+    /** @type {Map<string, number>} */
     const centers = new Map();
     arrange(root, edges, cfg, false);
     placeCross(root, 0, centers);
@@ -565,12 +874,33 @@ function optimizeOrder(root, edges, layers, cfg) {
   });
 }
 
+/**
+ * Where each layer starts along the flow, and its size along the flow, by layer.
+ * @param {RootUnit} root
+ * @param {RenderModel} model
+ * @param {Map<string, number>} layers
+ * @param {Map<string, CardBox>} boxes
+ * @param {LayoutConfig} cfg
+ * @param {boolean} horizontal
+ * @param {TextMeasurer} measure
+ * @returns {{ starts: number[], size: number[] }}
+ */
 function computeLayerPositions(root, model, layers, boxes, cfg, horizontal, measure) {
   const layerCount = Math.max(root.layerMax, 0) + 1;
+  /** @type {number[]} */
   const size = new Array(layerCount).fill(0);
+  /**
+   * The room each layer needs before it for the padding of the groups that start in it.
+   * @type {number[]}
+   */
   const open = new Array(layerCount).fill(0);
+  /**
+   * The room each layer needs after it for the padding of the groups that end in it.
+   * @type {number[]}
+   */
   const close = new Array(layerCount).fill(0);
 
+  /** @param {Unit} unit */
   const walk = (unit) => {
     if (unit.type === 'group' && unit.empty) {
       const layer = unit.layerMin;
@@ -596,7 +926,15 @@ function computeLayerPositions(root, model, layers, boxes, cfg, horizontal, meas
   };
   walk(root);
 
+  /**
+   * The number of links through the gap after each layer.
+   * @type {number[]}
+   */
   const linksThroughGap = new Array(layerCount).fill(0);
+  /**
+   * The room the link labels in the gap after each layer need.
+   * @type {number[]}
+   */
   const labelRoom = new Array(layerCount).fill(0);
   for (const edge of model.edges) {
     if (edge.from === edge.to) continue;
@@ -612,6 +950,7 @@ function computeLayerPositions(root, model, layers, boxes, cfg, horizontal, meas
     }
   }
 
+  /** @type {number[]} */
   const starts = new Array(layerCount).fill(0);
   for (let layer = 1; layer < layerCount; layer += 1) {
     const channel = Math.max(
@@ -623,9 +962,20 @@ function computeLayerPositions(root, model, layers, boxes, cfg, horizontal, meas
   return { starts, size };
 }
 
+/**
+ * Puts each link's label on its route, clear of components and other labels
+ * where it can, by link key.
+ * @param {Map<string, Point[]>} routes
+ * @param {RenderModel} model
+ * @param {Map<string, Rect>} rects
+ * @param {TextMeasurer} measure
+ * @returns {Map<string, EdgeLabelBox>}
+ */
 function placeLabels(routes, model, rects, measure) {
+  /** @type {Map<string, EdgeLabelBox>} */
   const boxes = new Map();
   const taken = [...rects.values()].map((r) => ({ x: r.x - 3, y: r.y - 3, w: r.w + 6, h: r.h + 6 }));
+  /** @param {Rect} box */
   const hits = (box) => {
     return taken.some((r) => {
       return box.x < r.x + r.w && box.x + box.w > r.x && box.y < r.y + r.h && box.y + box.h > r.y;
@@ -638,6 +988,7 @@ function placeLabels(routes, model, rects, measure) {
     if (!size || !points) continue;
     const { w, h } = size;
 
+    /** @type {Array<{ a: Point, b: Point, rank: number }>} */
     const segments = [];
     for (let i = 1; i < points.length; i += 1) {
       const a = points[i - 1];
@@ -650,6 +1001,7 @@ function placeLabels(routes, model, rects, measure) {
     }
     segments.sort((p, q) => p.rank - q.rank);
 
+    /** @type {Rect | null} */
     let chosen = null;
     search: for (const { a, b } of segments) {
       for (const t of [0.5, 0.35, 0.65, 0.2, 0.8]) {
@@ -670,8 +1022,18 @@ function placeLabels(routes, model, rects, measure) {
 }
 
 // Note text wrapped into a column of stickies, one per note.
+/**
+ * @param {RenderNote[]} notes
+ * @param {LayoutConfig} cfg
+ * @param {TextMeasurer} measure
+ * @returns {NoteBlock}
+ */
 function noteBlock(notes, cfg, measure) {
   let width = 0;
+  /**
+   * The stickies, each given its `y` and `h` just below.
+   * @type {NoteBlockItem[]}
+   */
   const items = notes.map((note) => {
     const lines = wrapText(note.text, cfg.noteMaxWidth, 'note', measure, cfg.maxNoteLines);
     for (const line of lines) width = Math.max(width, measure(line, 'note'));
@@ -687,11 +1049,19 @@ function noteBlock(notes, cfg, measure) {
   return { w, h: y - cfg.noteSpacing, items };
 }
 
+/**
+ * Places every component, group, note and link label, and routes the links.
+ * @param {RenderModel} model
+ * @param {Partial<typeof DEFAULTS> & LayoutOptions} [options]
+ * @returns {Layout}
+ */
 export function layoutDiagram(model, options = {}) {
+  /** @type {LayoutConfig} */
   const cfg = { ...DEFAULTS, ...options };
   const measure = cfg.measureText ?? estimateTextWidth;
   const horizontal = model.direction !== 'down';
 
+  /** @type {Map<string, RenderNote[]>} */
   const notesByTarget = new Map();
   for (const note of model.notes ?? []) {
     if (!model.nodeById.has(note.target)) continue;
@@ -699,6 +1069,7 @@ export function layoutDiagram(model, options = {}) {
     notesByTarget.get(note.target).push(note);
   }
 
+  /** @type {Map<string, CardBox>} */
   const boxes = new Map();
   for (const node of model.nodes) {
     const caption = node.caption ?? KINDS[node.kind]?.label ?? node.kind;
@@ -735,28 +1106,55 @@ export function layoutDiagram(model, options = {}) {
   optimizeOrder(root, model.edges, layers, cfg);
   arrange(root, model.edges, cfg, true);
 
+  /** @type {Map<string, number>} */
   const crossCenters = new Map();
   placeCross(root, 0, crossCenters);
   const { starts, size } = computeLayerPositions(root, model, layers, boxes, cfg, horizontal, measure);
 
+  /**
+   * @param {number} mainStart
+   * @param {number} crossStart
+   * @param {number} mainSize
+   * @param {number} crossSize
+   * @returns {Rect}
+   */
   const toRect = (mainStart, crossStart, mainSize, crossSize) => {
     return horizontal
       ? { x: Math.round(mainStart), y: Math.round(crossStart), w: mainSize, h: crossSize }
       : { x: Math.round(crossStart), y: Math.round(mainStart), w: crossSize, h: mainSize };
   };
 
+  /** @type {Map<string, NodeBox>} */
   const nodes = new Map();
+  /**
+   * What links route around: each card by component id, and each column of notes.
+   * @type {Map<string, Rect>}
+   */
   const rects = new Map();
+  /** @type {Map<string, GroupBox>} */
   const groups = new Map();
+  /** @type {Map<string, NoteColumn>} */
   const notes = new Map();
+  /**
+   * The ids of the groups each component is in, outermost first, by component id.
+   * @type {Map<string, string[]>}
+   */
   const ancestors = new Map();
 
+  /**
+   * @param {string} id
+   * @param {NoteBlock} block
+   * @param {Rect} card
+   * @param {number} slot Where the component's unit starts along the flow.
+   * @param {NodeUnit} unit
+   */
   const placeNotes = (id, block, card, slot, unit) => {
     const main = horizontal ? block.w : block.h;
     const cross = horizontal ? block.h : block.w;
     const rect = toRect(slot + (unit.mainSize - main) / 2, unit.crossStart + unit.cardCross + cfg.noteGap, main, cross);
     // A short dotted tie from the card to the first sticky.
     const first = block.items[0];
+    /** @type {[Point, Point]} */
     const tie = horizontal
       ? (() => {
           const x = Math.min(Math.max(card.x + card.w / 2, rect.x + 10), rect.x + rect.w - 10);
@@ -786,6 +1184,11 @@ export function layoutDiagram(model, options = {}) {
     rects.set(`\u0000note:${id}`, rect);
   };
 
+  /**
+   * @param {Unit} unit
+   * @param {string[]} chain The ids of the groups the unit is in, outermost first.
+   * @param {number} depth
+   */
   const placeRects = (unit, chain, depth) => {
     if (unit.type === 'node') {
       const box = boxes.get(unit.id);
@@ -850,6 +1253,7 @@ export function layoutDiagram(model, options = {}) {
   );
   const labels = placeLabels(routes, model, rects, measure);
 
+  /** @type {Map<string, EdgeLayout>} */
   const edges = new Map();
   for (const edge of model.edges) {
     edges.set(edge.key, { key: edge.key, points: routes.get(edge.key), label: labels.get(edge.key) ?? null });
@@ -859,6 +1263,12 @@ export function layoutDiagram(model, options = {}) {
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
+  /**
+   * @param {number} x
+   * @param {number} y
+   * @param {number} [w]
+   * @param {number} [h]
+   */
   const grow = (x, y, w = 0, h = 0) => {
     minX = Math.min(minX, x);
     minY = Math.min(minY, y);

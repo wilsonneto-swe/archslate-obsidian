@@ -8,17 +8,60 @@
 
 import { parse, slugify, splitProps } from './parser.js';
 
+/** @typedef {import('../types').Direction} Direction */
+/** @typedef {import('../types').CaretEdit} CaretEdit */
+/** @typedef {import('../types').DiagramEdge} DiagramEdge */
+/** @typedef {import('../types').DiagramNode} DiagramNode */
+/** @typedef {import('../types').EditResult} EditResult */
+/** @typedef {import('../types').FlowStep} FlowStep */
+/** @typedef {import('../types').LinkLine} LinkLine */
+/** @typedef {import('../types').LinkOp} LinkOp */
+/** @typedef {import('../types').Model} Model */
+/** @typedef {import('../types').NewEdge} NewEdge */
+/** @typedef {import('../types').NewGroup} NewGroup */
+/** @typedef {import('../types').NewNode} NewNode */
+/** @typedef {import('../types').NodeTokens} NodeTokens */
+/** @typedef {import('../types').Selection} Selection */
+/** @typedef {import('../types').TextRange} TextRange */
+
+/**
+ * Where insertAt() puts new lines: before line `index`. `blankBefore` /
+ * `blankAfter` ask for a blank line before / after them, added unless one is
+ * there already (or the lines go first / last).
+ * @typedef {{ index: number, blankBefore?: boolean, blankAfter?: boolean }} InsertSlot
+ */
+
+/**
+ * memberSlot()'s result: where a new member goes, and the indent of its lines.
+ * @typedef {InsertSlot & { indent: string }} MemberSlot
+ */
+
 const INDENT = '  ';
 
+/**
+ * A double-quoted string literal for the source, backslashes and quotes escaped.
+ * @param {string} value
+ * @returns {string}
+ */
 function quote(value) {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+/**
+ * A link label as written after ":", quoted only when it would not read back as is.
+ * @param {string} label
+ * @returns {string}
+ */
 function formatEdgeLabel(label) {
   const bare = !/["]|\s#|\s\/\/|^#|^\/\/|\]$|^\[/.test(label);
   return bare ? label : quote(label);
 }
 
+/**
+ * "[a, b]" for a list of details or a comma separated string ('' when empty).
+ * @param {string[] | string | null | undefined} props
+ * @returns {string}
+ */
 export function formatProps(props) {
   const list = (Array.isArray(props) ? props : splitProps(props ?? ''))
     .map((part) => part.replace(/[[\]]/g, '').trim())
@@ -28,6 +71,10 @@ export function formatProps(props) {
 
 // A whole number written as digits (a pasted "3.5" counts as 3), "N" for
 // many; anything else, 1 or less drops the marker.
+/**
+ * @param {number | string | null | undefined} count
+ * @returns {string}
+ */
 export function formatCount(count) {
   if (count === null || count === undefined) return '';
   const value = String(count).trim().replace(/^[x×]/i, '');
@@ -36,25 +83,53 @@ export function formatCount(count) {
   return digits && Number(digits) > 1 ? `x${digits}` : '';
 }
 
+/**
+ * `line` with the characters from `start` to `end` replaced by `value`.
+ * @param {string} line
+ * @param {number} start
+ * @param {number} end
+ * @param {string} value
+ * @returns {string}
+ */
 function replaceRange(line, start, end, value) {
   return line.slice(0, start) + value + line.slice(end);
 }
 
 // Removes a token together with the whitespace in front of it.
+/**
+ * @param {string} line
+ * @param {TextRange} token
+ * @returns {string}
+ */
 function removeToken(line, token) {
   let start = token.start;
   while (start > 0 && /\s/.test(line[start - 1])) start -= 1;
   return replaceRange(line, start, token.end, '');
 }
 
+/**
+ * @param {string} line
+ * @returns {string}
+ */
 function indentOf(line) {
   return line.match(/^\s*/)[0];
 }
 
+/**
+ * True for an empty or whitespace-only line, and past the last line (undefined).
+ * @param {string | undefined} line
+ * @returns {boolean}
+ */
 function isBlank(line) {
   return line === undefined || line.trim() === '';
 }
 
+/**
+ * An id from `base` that no component or group of `model` has yet ("api", "api_2"...).
+ * @param {Model} model
+ * @param {string} base
+ * @returns {string}
+ */
 function uniqueId(model, base) {
   const stem = slugify(base) || 'node';
   let id = stem;
@@ -63,8 +138,14 @@ function uniqueId(model, base) {
 }
 
 // Removes lines, then collapses any double blank left at the seams.
+/**
+ * @param {string[]} lines
+ * @param {number[]} indices
+ * @returns {string[]}
+ */
 function removeLines(lines, indices) {
   const doomed = new Set(indices);
+  /** @type {string[] & { seam?: boolean }} `seam`: a line was dropped since the last one kept */
   const out = [];
   lines.forEach((line, i) => {
     if (doomed.has(i)) {
@@ -80,6 +161,11 @@ function removeLines(lines, indices) {
 }
 
 // A declaration plus the notes written directly under it.
+/**
+ * @param {Model} model
+ * @param {number} line the declaration's line
+ * @returns {number} the last line: the declaration's, or its last note's
+ */
 function declarationEnd(model, line) {
   let end = line;
   while (model.lineIndex.get(end + 1)?.type === 'note') end += 1;
@@ -88,6 +174,11 @@ function declarationEnd(model, line) {
 
 // Where a new member of `groupId` (or of the top level when null) belongs: after
 // the last existing member, so the source keeps reading in declaration order.
+/**
+ * @param {Model} model
+ * @param {string | null} groupId
+ * @returns {MemberSlot}
+ */
 function memberSlot(model, groupId) {
   if (groupId) {
     const group = model.groupById.get(groupId);
@@ -129,6 +220,13 @@ function memberSlot(model, groupId) {
   return { index: header + 1, indent: '', blankBefore: header >= 0, blankAfter: true };
 }
 
+/**
+ * A copy of `lines` with `newLines` inserted at `slot`.
+ * @param {string[]} lines
+ * @param {InsertSlot} slot
+ * @param {string[]} newLines
+ * @returns {string[]}
+ */
 function insertAt(lines, slot, newLines) {
   const block = [...newLines];
   if (slot.blankBefore && slot.index > 0 && !isBlank(lines[slot.index - 1])) block.unshift('');
@@ -138,14 +236,31 @@ function insertAt(lines, slot, newLines) {
   return out;
 }
 
+/**
+ * What `line` of `text` declares, or null.
+ * @param {string} text
+ * @param {number} line
+ * @returns {Selection | null}
+ */
 function selectionAtLine(text, line) {
   return parse(text).lineIndex.get(line) ?? null;
 }
 
+/**
+ * The steps of every flow that `predicate` accepts.
+ * @param {Model} model
+ * @param {(step: FlowStep) => boolean} predicate
+ * @returns {FlowStep[]}
+ */
 function stepsWhere(model, predicate) {
   return model.flows.flatMap((flow) => flow.steps.filter(predicate));
 }
 
+/**
+ * @param {string} text
+ * @param {NewNode} node
+ * @returns {EditResult}
+ */
 export function addNode(text, { kind, label = '', group = null }) {
   const model = parse(text);
   const id = uniqueId(model, label || kind);
@@ -155,6 +270,11 @@ export function addNode(text, { kind, label = '', group = null }) {
   return { text: lines.join('\n'), select: { type: 'node', id } };
 }
 
+/**
+ * @param {string} text
+ * @param {NewGroup} group
+ * @returns {EditResult}
+ */
 export function addGroup(text, { label = '', parent = null }) {
   const model = parse(text);
   const id = uniqueId(model, label || 'group');
@@ -165,6 +285,11 @@ export function addGroup(text, { label = '', parent = null }) {
   return { text: lines.join('\n'), select: { type: 'group', id } };
 }
 
+/**
+ * @param {string} text
+ * @param {NewEdge} edge
+ * @returns {EditResult}
+ */
 export function addEdge(text, { from, to, op = '->', label = '' }) {
   const model = parse(text);
   const declaration = `${from} ${op} ${to}${label ? `: ${formatEdgeLabel(label)}` : ''}`;
@@ -172,7 +297,9 @@ export function addEdge(text, { from, to, op = '->', label = '' }) {
   const rootEdges = model.edges.filter((edge) => {
     return !model.groups.some((g) => g.line < edge.line && edge.line < g.endLine);
   });
+  /** @type {number} */
   let index;
+  /** @type {string[]} */
   let lines;
   if (rootEdges.length > 0) {
     index = Math.max(...rootEdges.map((edge) => edge.line)) + 1;
@@ -188,6 +315,12 @@ export function addEdge(text, { from, to, op = '->', label = '' }) {
   return { text: next, select: selectionAtLine(next, index) };
 }
 
+/**
+ * Removes the component with its links, its notes and the flow steps through it.
+ * @param {string} text
+ * @param {string} id
+ * @returns {EditResult}
+ */
 export function removeNode(text, id) {
   const model = parse(text);
   const node = model.nodeById.get(id);
@@ -203,12 +336,21 @@ export function removeNode(text, id) {
   return { text: removeLines(model.lines, doomed).join('\n'), select: null };
 }
 
+/**
+ * @param {string} text
+ * @param {string} key
+ * @returns {EditResult}
+ */
 export function removeEdge(text, key) {
   const model = parse(text);
   const edge = model.edgeByKey.get(key);
   if (!edge) return { text, select: null };
   // A step that can still walk another link between the same two components
   // stays (the parser's own rule: same direction, or a connection backwards).
+  /**
+   * @param {FlowStep} step
+   * @returns {boolean}
+   */
   const walksAnother = (step) =>
     model.edges.some((e) => e !== edge && ((e.from === step.from && e.to === step.to) || (e.op === '<->' && e.from === step.to && e.to === step.from)));
   const doomed = [edge.line, ...stepsWhere(model, (s) => s.edgeKey === key && !walksAnother(s)).map((s) => s.line)];
@@ -216,6 +358,11 @@ export function removeEdge(text, key) {
 }
 
 // Dissolves the box and keeps its contents, one indent level shallower.
+/**
+ * @param {string} text
+ * @param {string} id
+ * @returns {EditResult}
+ */
 export function ungroup(text, id) {
   const model = parse(text);
   const group = model.groupById.get(id);
@@ -229,6 +376,13 @@ export function ungroup(text, id) {
   return { text: removeLines(lines, doomed).join('\n'), select: null };
 }
 
+/**
+ * Rewrites the component's line with `transform`; the result selects the component.
+ * @param {string} text
+ * @param {string} id
+ * @param {(line: string, tokens: NodeTokens, node: DiagramNode) => string} transform
+ * @returns {EditResult}
+ */
 function editNodeLine(text, id, transform) {
   const model = parse(text);
   const node = model.nodeById.get(id);
@@ -238,6 +392,12 @@ function editNodeLine(text, id, transform) {
   return { text: lines.join('\n'), select: { type: 'node', id } };
 }
 
+/**
+ * @param {string} text
+ * @param {string} id
+ * @param {string} label
+ * @returns {EditResult}
+ */
 export function setNodeLabel(text, id, label) {
   return editNodeLine(text, id, (line, { id: idToken, label: labelToken }) => {
     const clean = label.trim();
@@ -248,11 +408,23 @@ export function setNodeLabel(text, id, label) {
   });
 }
 
+/**
+ * @param {string} text
+ * @param {string} id
+ * @param {string} kind
+ * @returns {EditResult}
+ */
 export function setNodeKind(text, id, kind) {
   return editNodeLine(text, id, (line, tokens) => replaceRange(line, tokens.kind.start, tokens.kind.end, kind));
 }
 
 // `count`: a number, "N" for "many", or null / 1 to drop the marker.
+/**
+ * @param {string} text
+ * @param {string} id
+ * @param {number | string | null} count
+ * @returns {EditResult}
+ */
 export function setNodeCount(text, id, count) {
   return editNodeLine(text, id, (line, tokens) => {
     const value = formatCount(count);
@@ -264,6 +436,12 @@ export function setNodeCount(text, id, count) {
 }
 
 // `props`: an array, or a comma separated string. Empty removes the brackets.
+/**
+ * @param {string} text
+ * @param {string} id
+ * @param {string[] | string} props
+ * @returns {EditResult}
+ */
 export function setNodeProps(text, id, props) {
   return editNodeLine(text, id, (line, tokens) => {
     const value = formatProps(props);
@@ -274,6 +452,12 @@ export function setNodeProps(text, id, props) {
   });
 }
 
+/**
+ * @param {string} text
+ * @param {string} id
+ * @param {string} label
+ * @returns {EditResult}
+ */
 export function setGroupLabel(text, id, label) {
   const model = parse(text);
   const group = model.groupById.get(id);
@@ -295,6 +479,12 @@ export function setGroupLabel(text, id, label) {
 }
 
 // Moves the declaration, and the notes written under it, into another group.
+/**
+ * @param {string} text
+ * @param {string} id
+ * @param {string | null} groupId null: out of every group
+ * @returns {EditResult}
+ */
 export function moveNodeToGroup(text, id, groupId) {
   const model = parse(text);
   const node = model.nodeById.get(id);
@@ -315,6 +505,13 @@ export function moveNodeToGroup(text, id, groupId) {
 }
 
 // Applies `transform` to the link's own line and to every flow step walking it.
+/**
+ * @param {string} text
+ * @param {string} key
+ * @param {(line: string, edge: DiagramEdge) => string} transform
+ * @param {(line: string, step: FlowStep) => string} [stepTransform] none: the steps stay as they are
+ * @returns {EditResult}
+ */
 function editEdgeLines(text, key, transform, stepTransform) {
   const model = parse(text);
   const edge = model.edgeByKey.get(key);
@@ -330,12 +527,33 @@ function editEdgeLines(text, key, transform, stepTransform) {
   return { text: next, select: selectionAtLine(next, edge.line) };
 }
 
+/**
+ * @param {string} text
+ * @param {string} key
+ * @param {LinkOp} op
+ * @returns {EditResult}
+ */
 export function setEdgeOp(text, key, op) {
+  /**
+   * @param {string} line
+   * @param {LinkLine} item the link, or a step walking it
+   * @returns {string}
+   */
   const swapArrow = (line, item) => replaceRange(line, item.tokens.arrow.start, item.tokens.arrow.end, op);
   return editEdgeLines(text, key, swapArrow, (line, step) => (step.reversed ? line : swapArrow(line, step)));
 }
 
+/**
+ * @param {string} text
+ * @param {string} key
+ * @returns {EditResult}
+ */
 export function reverseEdge(text, key) {
+  /**
+   * @param {string} line
+   * @param {LinkLine} item the link, or a step walking it
+   * @returns {string}
+   */
   const swapEnds = (line, item) => {
     const { from, to } = item.tokens;
     // Later token first, so the earlier offsets stay valid.
@@ -345,6 +563,12 @@ export function reverseEdge(text, key) {
   return editEdgeLines(text, key, swapEnds, swapEnds);
 }
 
+/**
+ * @param {string} text
+ * @param {string} key
+ * @param {string} label
+ * @returns {EditResult}
+ */
 export function setEdgeLabel(text, key, label) {
   return editEdgeLines(text, key, (line, edge) => {
     const { to, colon, label: labelToken } = edge.tokens;
@@ -357,6 +581,12 @@ export function setEdgeLabel(text, key, label) {
 
 // New details go right after the link's ends (`a -> b [details]: label`):
 // after an unquoted label, a "#" in them would read as a comment.
+/**
+ * @param {string} text
+ * @param {string} key
+ * @param {string[] | string} props
+ * @returns {EditResult}
+ */
 export function setEdgeProps(text, key, props) {
   return editEdgeLines(text, key, (line, edge) => {
     const { to, props: propsToken } = edge.tokens;
@@ -367,6 +597,12 @@ export function setEdgeProps(text, key, props) {
   });
 }
 
+/**
+ * @param {string} text
+ * @param {string} target the component's id
+ * @param {string} noteText
+ * @returns {EditResult}
+ */
 export function addNote(text, target, noteText) {
   const model = parse(text);
   const node = model.nodeById.get(target);
@@ -379,6 +615,13 @@ export function addNote(text, target, noteText) {
   return { text: next, select: selectionAtLine(next, index) };
 }
 
+/**
+ * Empty text removes the note.
+ * @param {string} text
+ * @param {string} key
+ * @param {string} noteText
+ * @returns {EditResult}
+ */
 export function setNoteText(text, key, noteText) {
   const model = parse(text);
   const note = model.noteByKey.get(key);
@@ -390,6 +633,11 @@ export function setNoteText(text, key, noteText) {
   return { text: lines.join('\n'), select: { type: 'note', key } };
 }
 
+/**
+ * @param {string} text
+ * @param {string} key
+ * @returns {EditResult}
+ */
 export function removeNote(text, key) {
   const model = parse(text);
   const note = model.noteByKey.get(key);
@@ -397,6 +645,11 @@ export function removeNote(text, key) {
   return { text: removeLines(model.lines, [note.line]).join('\n'), select: null };
 }
 
+/**
+ * @param {string} text
+ * @param {Direction} direction
+ * @returns {EditResult}
+ */
 export function setDirection(text, direction) {
   const model = parse(text);
   if (model.direction === direction && model.directionLine >= 0) return { text, select: null };
@@ -416,6 +669,10 @@ export function setDirection(text, direction) {
 
 // Starts the markdown section if there is none. Returns the line the caret
 // should go to.
+/**
+ * @param {string} text
+ * @returns {CaretEdit}
+ */
 export function ensureMarkdown(text) {
   const model = parse(text);
   if (model.markdownLine >= 0) return { text, line: model.lines.length - 1 };

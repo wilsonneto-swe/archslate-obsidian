@@ -7,8 +7,28 @@ import { KINDS, OPS } from '../core/kinds.js';
 import { svg, setAttrs, viewOf } from './dom.js';
 import { KIND_ICONS } from './icons.js';
 
+/** @typedef {import('../types').CanvasView} CanvasView */
+/** @typedef {import('../types').EdgeLabelBox} EdgeLabelBox */
+/** @typedef {import('../types').FlowMembership} FlowMembership */
+/** @typedef {import('../types').Layout} Layout */
+/** @typedef {import('../types').LinkOp} LinkOp */
+/** @typedef {import('../types').NodeBox} NodeBox */
+/** @typedef {import('../types').Point} Point */
+/** @typedef {import('../types').Rect} Rect */
+/** @typedef {import('../types').RenderEdge} RenderEdge */
+/** @typedef {import('../types').RenderModel} RenderModel */
+/** @typedef {import('../types').RenderNode} RenderNode */
+/** @typedef {import('../types').Selection} Selection */
+
 const HEAD = 9;
 
+/**
+ * Path data for an orthogonal polyline with rounded corners (a corner's
+ * radius shrinks to fit short segments); '' for fewer than two points.
+ * @param {Point[]} points
+ * @param {number} [radius]
+ * @returns {string}
+ */
 function roundedPath(points, radius = 7) {
   if (points.length < 2) return '';
   let d = `M${points[0].x} ${points[0].y}`;
@@ -31,6 +51,11 @@ function roundedPath(points, radius = 7) {
 
 // Pulls the final point back so the stroke ends under the arrowhead, and
 // returns the head geometry.
+/**
+ * @param {Point[]} points The route, at least two points.
+ * @param {boolean} filled A closed, filled head; otherwise an open chevron.
+ * @returns {{ head: string, trimmed: Point[] }} The head's path data, and the route ending under it.
+ */
 function arrowHead(points, filled) {
   const tip = points.at(-1);
   const from = points.at(-2);
@@ -47,6 +72,13 @@ function arrowHead(points, filled) {
   return { head, trimmed };
 }
 
+/**
+ * A link's arrowheads (both ends for '<->') and its route trimmed to end under
+ * them; '->' and '<->' heads are filled, '-->' heads are open.
+ * @param {Point[]} points
+ * @param {LinkOp} op
+ * @returns {{ heads: string[], trimmed: Point[], filled: boolean }}
+ */
 function edgeGeometry(points, op) {
   if (op === '<->') {
     const end = arrowHead(points, true);
@@ -58,6 +90,12 @@ function edgeGeometry(points, op) {
   return { heads: [head], trimmed, filled };
 }
 
+/**
+ * The class, with its leading space, of a component, link or note in flow
+ * view: dimmed outside the flow, marked in it; '' outside flow view.
+ * @param {{ flow?: FlowMembership }} item
+ * @returns {string}
+ */
 const flowClass = (item) => (item.flow === 'out' ? ' is-dimmed' : item.flow === 'in' ? ' is-flow' : '');
 
 export class DiagramRenderer {
@@ -78,30 +116,46 @@ export class DiagramRenderer {
       this.labelLayer,
       this.toolLayer,
     );
-    this.svg = svg('svg', { class: 'sd-svg', role: 'img', 'aria-label': 'Diagram' }, this.viewport);
+    // No label here: the editor's stage around it has one, and an embed labels
+    // its own. (Obsidian shows an aria-label as a tooltip, and fails on an <svg>'s.)
+    this.svg = svg('svg', { class: 'sd-svg' }, this.viewport);
 
+    /** @type {Map<string, { root: SVGGElement, signature: string }>} */
     this.nodeEls = new Map();
+    /** @type {Map<string, { root: SVGGElement, rect: SVGRectElement, title: SVGTextElement }>} */
     this.groupEls = new Map();
+    /** @type {Map<string, { root: SVGGElement, label: SVGGElement | null, edge: RenderEdge }>} */
     this.edgeEls = new Map();
+    /**
+     * Each component's column of notes, by component id; `items` by note key.
+     * @type {Map<string, { root: SVGGElement, signature: string, items: Map<string, SVGGElement> }>}
+     */
     this.noteEls = new Map();
+    /** @type {Map<string, SVGGElement>} */
     this.noteItemEls = new Map();
+    /**
+     * Where each group ("g:<id>") and component ("n:<id>") was last drawn.
+     * @type {Map<string, Rect>}
+     */
     this.positions = new Map();
+    /** @type {Selection | null} */
     this.selection = null;
   }
 
-  setView({ k, tx, ty }) {
+  setView(/** @type {CanvasView} */ { k, tx, ty }) {
     this.viewport.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
   }
 
-  update(model, layout) {
+  update(/** @type {RenderModel} */ model, /** @type {Layout} */ layout) {
     const moved = this.updateGroups(model, layout) | this.updateNodes(model, layout);
     this.updateNotes(layout);
     this.updateEdges(model, layout, moved);
     this.applySelection();
   }
 
-  updateGroups(model, layout) {
+  updateGroups(/** @type {RenderModel} */ model, /** @type {Layout} */ layout) {
     let moved = false;
+    /** @type {Set<string>} */
     const live = new Set();
     for (const group of model.groups) {
       const box = layout.groups.get(group.id);
@@ -140,8 +194,9 @@ export class DiagramRenderer {
     return moved;
   }
 
-  updateNodes(model, layout) {
+  updateNodes(/** @type {RenderModel} */ model, /** @type {Layout} */ layout) {
     let moved = false;
+    /** @type {Set<string>} */
     const live = new Set();
     for (const node of model.nodes) {
       const box = layout.nodes.get(node.id);
@@ -190,13 +245,14 @@ export class DiagramRenderer {
     return moved;
   }
 
-  nodeContent(node, box) {
+  nodeContent(/** @type {RenderNode} */ node, /** @type {NodeBox} */ box) {
     const stack = box.stack ?? 0;
     const w = box.w - stack;
     const h = box.h - stack;
     const kindLabel = KINDS[node.kind]?.label ?? node.kind;
     const tooltip = [`${node.label} (${kindLabel}${node.count ? `, ×${node.count}` : ''})`, ...(node.props ?? [])].join('\n');
 
+    /** @type {SVGElement[]} */
     const card = [
       svg('rect', { class: 'sd-node-box', width: w, height: h, rx: 11 }),
       svg('rect', { class: 'sd-node-tile', x: 10, y: 10, width: 36, height: 36, rx: 9 }),
@@ -232,6 +288,7 @@ export class DiagramRenderer {
       );
     }
 
+    /** @type {SVGElement[]} */
     const children = [svg('title', { text: tooltip })];
     if (stack) {
       // Two cards peeking out behind: "several identical copies".
@@ -257,7 +314,8 @@ export class DiagramRenderer {
     return children;
   }
 
-  updateNotes(layout) {
+  updateNotes(/** @type {Layout} */ layout) {
+    /** @type {Set<string>} */
     const live = new Set();
     this.noteItemEls.clear();
     for (const [target, block] of layout.notes ?? []) {
@@ -308,7 +366,7 @@ export class DiagramRenderer {
     }
   }
 
-  updateEdges(model, layout, moved) {
+  updateEdges(/** @type {RenderModel} */ model, /** @type {Layout} */ layout, /** @type {number} */ moved) {
     this.edgeLayer.replaceChildren();
     this.labelLayer.replaceChildren();
     this.edgeEls.clear();
@@ -342,8 +400,9 @@ export class DiagramRenderer {
     }
   }
 
-  edgeLabel(edge, box, classes) {
+  edgeLabel(/** @type {RenderEdge} */ edge, /** @type {EdgeLabelBox} */ box, /** @type {string} */ classes) {
     const { x, y, w, h, text, propsText, badge, badgeW } = box;
+    /** @type {SVGElement[]} */
     const parts = [];
     if (badge && !text && !propsText) {
       parts.push(
@@ -384,7 +443,7 @@ export class DiagramRenderer {
     return label;
   }
 
-  setSelection(selection) {
+  setSelection(/** @type {Selection | null} */ selection) {
     this.selection = selection;
     this.applySelection();
   }
@@ -410,14 +469,14 @@ export class DiagramRenderer {
     }
   }
 
-  setLinkTarget(id) {
+  setLinkTarget(/** @type {string | null} */ id) {
     for (const [nodeId, { root }] of this.nodeEls) {
       root.classList.toggle('is-link-target', nodeId === id);
     }
   }
 
   // Rubber band shown while linking.
-  showLinkPreview(from, to) {
+  showLinkPreview(/** @type {Point | null} */ from, /** @type {Point | null | undefined} */ to) {
     this.toolLayer.replaceChildren();
     if (!from || !to) return;
     this.toolLayer.append(
@@ -426,16 +485,21 @@ export class DiagramRenderer {
     );
   }
 
-  hit(target) {
+  hit(/** @type {EventTarget | null} */ target) {
     const element = target instanceof Element ? target : null;
     const ghost = element?.closest('[data-ghost]');
     if (ghost) return null;
+    // The elements with these attributes are the renderer's own SVG groups.
+    /** @type {SVGElement | null | undefined} */
     const note = element?.closest('[data-note]');
     if (note) return { type: 'note', key: note.dataset.note };
+    /** @type {SVGElement | null | undefined} */
     const node = element?.closest('[data-node]');
     if (node) return { type: 'node', id: node.dataset.node };
+    /** @type {SVGElement | null | undefined} */
     const edge = element?.closest('[data-edge]');
     if (edge) return { type: 'edge', key: edge.dataset.edge };
+    /** @type {SVGElement | null | undefined} */
     const group = element?.closest('[data-group]');
     if (group) return { type: 'group', id: group.dataset.group };
     return null;

@@ -13,21 +13,36 @@
 // Hover previews and embeds are not tabs: they keep showing the Markdown, where
 // the code block draws the diagram anyway.
 
-/** @typedef {'diagram' | 'markdown'} Choice */
+/** @typedef {import('../../../packages/types').OpenChoice} Choice */
 
+/**
+ * @param {import('../../../packages/types').OpenRequest} request
+ * @returns {boolean}
+ */
 export function opensAsDiagram({ type, path, layoutReady, restoring = false, choice, flagged }) {
   if (type !== 'markdown' || path === null || !path.toLowerCase().endsWith('.md') || !layoutReady || restoring || !flagged) return false;
   return choice !== 'markdown';
 }
 
-/** The path something keyed by `path` moves to when `oldPath` is renamed (a folder moves everything inside). */
+/**
+ * The path something keyed by `path` moves to when `oldPath` is renamed (a folder moves everything inside).
+ * @param {string} path
+ * @param {string} oldPath
+ * @param {string} newPath
+ * @returns {string | null} null when the rename does not move it
+ */
 export function renamedPath(path, oldPath, newPath) {
   if (path === oldPath) return newPath;
   if (path.startsWith(`${oldPath}/`)) return newPath + path.slice(oldPath.length);
   return null;
 }
 
-/** `Untitled diagram`, then `Untitled diagram 1`, ... whichever is free. */
+/**
+ * `Untitled diagram`, then `Untitled diagram 1`, ... whichever is free.
+ * @param {(name: string) => boolean} taken
+ * @param {string} base
+ * @returns {string}
+ */
 export function untitledName(taken, base) {
   if (!taken(base)) return base;
   for (let n = 1; ; n += 1) if (!taken(`${base} ${n}`)) return `${base} ${n}`;

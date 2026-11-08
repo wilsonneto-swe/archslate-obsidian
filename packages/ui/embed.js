@@ -10,6 +10,12 @@ import { DiagramRenderer } from './renderer.js';
 
 const PADDING = 16;
 
+/**
+ * Draws the diagram `source` declares into `container`.
+ * @param {HTMLElement} container
+ * @param {string} source
+ * @returns {{ root: HTMLDivElement, model: import('../types').Model }}
+ */
 export function renderDiagram(container, source) {
   const model = parse(source);
   const root = el('div', { class: 'sd-embed' });
@@ -25,6 +31,7 @@ export function renderDiagram(container, source) {
     const svg = renderer.svg;
     svg.setAttribute('viewBox', `${x - PADDING} ${y - PADDING} ${w + 2 * PADDING} ${h + 2 * PADDING}`);
     svg.setAttribute('width', String(Math.ceil(w + 2 * PADDING)));
+    svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', `Diagram with ${model.nodes.length} components`);
     svg.classList.add('sd-embed-svg');
     root.append(svg);
