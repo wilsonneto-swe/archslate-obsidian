@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in Archslate doesn't work as described in the README.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. For questions and help, use [Discussions](https://github.com/wilsonneto-swe/archslate-obsidian/discussions) instead.
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - The Obsidian plugin
+        - Archslate on the web
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Archslate version
+      description: Settings > Community plugins shows it. On the web, write "web".
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian version (or browser, on the web)
+      description: Settings > General shows it. On the web, the browser and its version.
+      placeholder: "1.14.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Choose every platform where it happens.
+      multiple: true
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - iOS / iPadOS
+        - Android
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What you did
+      description: The steps that lead to the problem. A small diagram that shows it helps most (paste its source; leave out anything private).
+      placeholder: |
+        1. Open a diagram with ...
+        2. Press ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Errors in the developer console (optional)
+      description: View > Toggle Developer Tools > Console. Copy any red lines that mention Archslate.
+      render: text

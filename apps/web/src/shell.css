@@ -1,0 +1,215 @@
+/*
+ * The web page around the editor. It stands in for Obsidian's theme: it
+ * defines the CSS variables the editor reads, in light and dark, so the page
+ * looks like the plugin does inside a vault. theme.js picks the theme before
+ * the first paint.
+ */
+
+:root[data-theme='light'] {
+  --background-primary: #ffffff;
+  --background-secondary: #f6f6f7;
+  --background-modifier-border: #e3e3e6;
+  --background-modifier-border-hover: #cfcfd4;
+  --background-modifier-hover: rgb(0 0 0 / 0.05);
+  --text-normal: #222326;
+  --text-muted: #5f616a;
+  --text-faint: #9a9ca4;
+  --text-on-accent: #ffffff;
+  --interactive-accent: #7357f6;
+  --color-red: #e93147;
+  --color-orange: #e07400;
+  --color-yellow: #c99a00;
+  --color-green: #0a9e45;
+  --color-cyan: #0098a6;
+  --color-blue: #1b6fd8;
+  --color-purple: #7852ee;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --background-primary: #1e1e20;
+  --background-secondary: #252528;
+  --background-modifier-border: #36363b;
+  --background-modifier-border-hover: #4a4a50;
+  --background-modifier-hover: rgb(255 255 255 / 0.06);
+  --text-normal: #dcdcde;
+  --text-muted: #a4a5ab;
+  --text-faint: #6d6e75;
+  --text-on-accent: #ffffff;
+  --interactive-accent: #8b72ff;
+  --color-red: #fb464c;
+  --color-orange: #e9973f;
+  --color-yellow: #e0de71;
+  --color-green: #44cf6e;
+  --color-cyan: #53c9d6;
+  --color-blue: #4c9bff;
+  --color-purple: #a882ff;
+  color-scheme: dark;
+}
+
+:root {
+  --font-interface: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-monospace: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 42px;
+  padding: 0 12px 0 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  font-size: 13px;
+}
+
+.shell-title {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.shell-note {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.shell-spacer {
+  flex: 1;
+}
+
+.shell-button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.shell-button:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+#app {
+  flex: 1;
+  min-height: 0;
+}
+
+.shell-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shell-logo {
+  width: 18px;
+  height: 18px;
+}
+
+.shell-link {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-decoration: none;
+}
+
+.shell-link:hover {
+  color: var(--text-normal);
+  text-decoration: underline;
+}
+
+.shell-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--background-modifier-border);
+}
+
+.shell-button.is-primary {
+  border-color: transparent;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.shell-button.is-primary:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 85%, black);
+  color: var(--text-on-accent);
+}
+
+/* Shown while a file is dragged over the page. */
+.shell-drop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--background-primary) 82%, transparent);
+  outline: 3px dashed var(--interactive-accent);
+  outline-offset: -14px;
+  color: var(--text-normal);
+  font-size: 15px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.shell-drop[hidden] {
+  display: none;
+}
+
+/* Shown when the stored diagram could not be opened (main.js: recover). */
+.shell-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  flex: none;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--color-orange) 14%, var(--background-primary));
+  font-size: 13px;
+}
+
+.shell-notice[hidden] {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .shell-note,
+  .shell-link,
+  .shell-sep {
+    display: none;
+  }
+}
+
+/* Phones: the logo stands in for the name, so every button fits. */
+@media (max-width: 440px) {
+  .shell-header {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .shell-name {
+    display: none;
+  }
+
+  .shell-button {
+    padding: 0 8px;
+  }
+}

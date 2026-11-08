@@ -1,0 +1,97 @@
+# Builds the plugin and drafts a GitHub release when a version tag is pushed (Obsidian's recommended workflow:
+# https://docs.obsidian.md/Plugins/Releasing/Release+your+plugin+with+GitHub+Actions). The tag must be the
+# version in manifest.json, x.y.z without a "v"; other tags never start it. The release carries the three files
+# Obsidian installs (main.js, manifest.json, styles.css, built into apps/obsidian/dist) with build attestations,
+# which let Obsidian's community directory check that the release was built from this repository's code.
+# Publish the draft once its notes are written.
+#
+# Two jobs: "build" installs the dev tools and runs every check with read-only access; only "release", which
+# runs no project code, may write the release and sign the attestation.
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: The tag is the manifest's version
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          version="$(node -p "require('./manifest.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag $tag does not match manifest.json version $version" >&2
+            exit 1
+          fi
+          if [ "$(node -p "require('./versions.json')['$version']")" != "$(node -p "require('./manifest.json').minAppVersion")" ]; then
+            echo "versions.json does not map $version to the manifest's minAppVersion" >&2
+            exit 1
+          fi
+
+      - name: Check and build
+        run: |
+          npm ci
+          npm run check
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          if-no-files-found: error
+          path: |
+            apps/obsidian/dist/main.js
+            apps/obsidian/dist/manifest.json
+            apps/obsidian/dist/styles.css
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin
+          path: dist
+
+      - name: Generate artifact attestation
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css
+
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title="$tag" \
+            --draft \
+            dist/main.js dist/manifest.json dist/styles.css

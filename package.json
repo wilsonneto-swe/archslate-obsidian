@@ -1,0 +1,48 @@
+{
+  "name": "archslate",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Archslate: system design diagrams as code. An Obsidian plugin and a web page sharing one editor; text is the only source of truth, with versions and visual diffs built in.",
+  "homepage": "https://wilsonneto-swe.github.io/archslate-obsidian/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wilsonneto-swe/archslate-obsidian.git"
+  },
+  "type": "module",
+  "author": "Wilson Neto",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "test": "node --test \"test/*.test.js\" \"apps/obsidian/test/*.test.js\"",
+    "test:e2e": "node --test --test-concurrency=1 \"e2e/*.test.mjs\"",
+    "lint": "eslint .",
+    "build": "npm run build:web && npm run build:obsidian",
+    "build:web": "node scripts/build-web.mjs",
+    "build:obsidian": "node scripts/build-obsidian.mjs",
+    "build:skill": "node scripts/build-skill.mjs",
+    "check": "npm run lint && npm run build && node scripts/build-skill.mjs --check && npm test && npm run check:public",
+    "check:public": "node scripts/check-public.mjs",
+    "obsidian:install": "node scripts/build-obsidian.mjs --vault",
+    "readme:media": "node scripts/readme-media.mjs",
+    "preversion": "node scripts/version-bump.mjs --check",
+    "version": "node scripts/version-bump.mjs && git add manifest.json versions.json"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@eslint/json": "0.14.0",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
+    "eslint-plugin-obsidianmd": "0.4.2",
+    "obsidian": "1.13.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1"
+  },
+  "overrides": {
+    "eslint-plugin-obsidianmd": {
+      "obsidian": "$obsidian"
+    }
+  }
+}

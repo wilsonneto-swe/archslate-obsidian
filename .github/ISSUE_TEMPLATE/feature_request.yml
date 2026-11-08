@@ -1,0 +1,26 @@
+name: Feature request
+description: Something Archslate could do for the way you study or discuss system design.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Not sure yet? Talk it through in [Discussions › Ideas](https://github.com/wilsonneto-swe/archslate-obsidian/discussions/categories/ideas) first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to show or do?
+      description: The system, the question, the step that is hard today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help
+      description: How it could look in the text, on the canvas, or both.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead (optional)

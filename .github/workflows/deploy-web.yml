@@ -1,0 +1,72 @@
+name: deploy-web
+
+# Builds the web version (apps/web) and publishes it to GitHub Pages: https://wilsonneto-swe.github.io/archslate-obsidian/
+# The published folder is what `npm run build:web` writes: no source maps, the page's Content-Security-Policy
+# checked by scripts/build-web.mjs, and nothing private (scripts/check-public.mjs). Every URL in the page is
+# relative, so the project-site sub-path needs no configuration.
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+# (or: gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'packages/**'
+      - 'scripts/build-web.mjs'
+      - 'scripts/check-public.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install (exact lockfile)
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build the web version (CSP checked)
+        run: node scripts/build-web.mjs --out apps/web/dist
+
+      - name: Nothing private in what gets published
+        run: node scripts/check-public.mjs apps/web/dist
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

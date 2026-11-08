@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Everything runs in this page: no requests anywhere else, no inline code. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'"
+    />
+    <title>Archslate · system design diagrams as code</title>
+    <meta name="description" content="Draw system design diagrams from a few lines of text or by clicking, save versions and see what changed. Runs in your browser; nothing is uploaded." />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <!-- build:css styles.css -->
+    <link rel="stylesheet" href="./src/shell.css" />
+    <link rel="stylesheet" href="../../packages/ui/styles.css" />
+    <!-- endbuild -->
+    <script src="./src/theme.js"></script>
+    <!-- build:js app.js -->
+    <script type="module" src="./src/main.js"></script>
+    <!-- endbuild -->
+  </head>
+  <body>
+    <header class="shell-header">
+      <span class="shell-title">
+        <svg class="shell-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="3.5" width="7" height="5" rx="1.5" />
+          <rect x="14" y="15.5" width="7" height="5" rx="1.5" />
+          <rect x="3" y="15.5" width="7" height="5" rx="1.5" />
+          <path d="M6.5 8.5v7M10 6h4.5a2 2 0 0 1 2 2v7.5" />
+        </svg>
+        <span class="shell-name">Archslate</span>
+      </span>
+      <span class="shell-note">diagrams as code · saved in this browser</span>
+      <span class="shell-spacer"></span>
+      <button type="button" class="shell-button" id="open-file" title="Open a diagram note (.md), a source file or a backup">Open…</button>
+      <button type="button" class="shell-button" id="save-file" title="Download the diagram as a Markdown note, with every saved version">Save</button>
+      <button type="button" class="shell-button" id="reset-example" title="Replace the diagram with the example">Example</button>
+      <button type="button" class="shell-button" id="toggle-theme">Dark</button>
+      <span class="shell-sep"></span>
+      <a class="shell-link" href="https://github.com/wilsonneto-swe/archslate-obsidian" target="_blank" rel="noopener noreferrer">Obsidian plugin</a>
+    </header>
+    <div class="shell-notice" id="recovered" role="alert" hidden>
+      <span>The diagram kept in this browser could not be shown, so the example is open instead. Your diagram is set aside:</span>
+      <button type="button" class="shell-button is-primary" id="recovered-download">Download it</button>
+      <button type="button" class="shell-button" id="recovered-close">Dismiss</button>
+    </div>
+    <main id="app"></main>
+    <input type="file" id="file-input" accept=".md,.markdown,.sd,.txt,.json,text/markdown,text/plain,application/json" hidden />
+    <div class="shell-drop" id="drop" hidden>Drop a diagram note to open it</div>
+  </body>
+</html>

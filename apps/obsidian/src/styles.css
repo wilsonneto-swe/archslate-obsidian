@@ -1,0 +1,68 @@
+/*
+ * The plugin's own styles, appended to the editor's (packages/ui/styles.css)
+ * in the styles.css Obsidian loads. Only Obsidian's variables are used, so
+ * themes and snippets apply.
+ */
+
+/* The editor fills the view, edge to edge. */
+.archslate-view.view-content {
+  padding: 0;
+  overflow: hidden;
+}
+
+.archslate-view .sd-editor-host {
+  height: 100%;
+}
+
+/* A drawn ```archslate block in a note: the button that opens it in the editor. */
+.sd-embed {
+  position: relative;
+}
+
+.sd-embed .archslate-open {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.sd-embed:hover .archslate-open,
+.sd-embed .archslate-open:focus-visible {
+  opacity: 1;
+}
+
+/* Touch screens have no hover: the button always shows. */
+.is-mobile .sd-embed .archslate-open {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .sd-embed .archslate-open {
+    opacity: 1;
+  }
+}
+
+/* Rendered notes inside the editor: Obsidian's Markdown styles, at panel size. */
+.archslate-view .sd-notes-body.markdown-rendered {
+  font-size: var(--font-ui-medium, 14px);
+}
+
+/*
+ * Obsidian's status bar floats over the bottom-right corner of the window:
+ * the versions strip goes to the top of the view, and the zoom controls sit
+ * above the status bar.
+ */
+.archslate-view .sd-timeline {
+  order: -1;
+  border-top: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.archslate-view .sd-zoombar {
+  bottom: 40px;
+}
+
+.is-mobile .archslate-view .sd-zoombar {
+  bottom: 10px;
+}

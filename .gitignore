@@ -1,0 +1,14 @@
+# dependencies
+node_modules/
+
+# builds
+apps/obsidian/dist/
+apps/web/dist/
+
+# a test vault's plugin data, logs and OS noise
+data.json
+*.log
+.DS_Store
+
+# A vault opened inside the repository (a test vault)
+.obsidian/
