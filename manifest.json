@@ -1,7 +1,7 @@
 {
   "id": "archslate",
   "name": "Archslate",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.7.2",
   "description": "Draw system design diagrams from a few lines of text or by clicking, save versions and see what changed. Each diagram is a Markdown note with a code block.",
   "author": "Wilson Neto",
