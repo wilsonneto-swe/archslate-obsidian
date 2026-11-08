@@ -335,6 +335,7 @@ export class Canvas {
   }
 
   fit(/** @type {boolean} */ animate) {
+    if (!this.layout) return;
     const { bounds } = this.layout;
     const width = this.stage.clientWidth;
     const height = this.stage.clientHeight;
@@ -738,6 +739,7 @@ export class Canvas {
   }
 
   positionRename() {
+    if (!this.renameState) return;
     const { selection, input } = this.renameState;
     const box = selection.type === 'node' ? this.layout.nodes.get(selection.id) : this.layout.groups.get(selection.id);
     if (!box) return;
@@ -1318,6 +1320,7 @@ export class Canvas {
   }
 
   movePinch() {
+    if (!this.pinch) return;
     const [a, b] = [...this.pointers.values()];
     const rect = this.stage.getBoundingClientRect();
     const { distance, mid, view } = this.pinch;

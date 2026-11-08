@@ -47,5 +47,11 @@ What the directory and its review look at:
   recommended rules, and typescript-eslint's type-checked recommended rules, which the directory's source scan
   uses. The code is JavaScript typed with JSDoc comments (the shared shapes are in `packages/types.d.ts`), so
   those rules see real types rather than `any`.
+- That scan (the scanner config in `obsidianmd/obsidian-workflows`) installs its own typescript-eslint, which
+  brings the newest TypeScript it accepts (6.0 when this was written), and reads this repository's
+  `tsconfig.json`. TypeScript 6 turns `strict` on by default, so `tsconfig.json` spells it out and the
+  `typescript` dev dependency is the same release: `npm run lint` reads the types the way the scan does. The web
+  app's sources stay out of `tsconfig.json`: the scan lists them as files it could not read with types, not as
+  warnings, and Obsidian's plugin rules do not fit a web page.
 - The directory also lints every stylesheet in the repository with stylelint: features Obsidian's Electron
   supports, no `!important`, no named colours.

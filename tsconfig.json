@@ -1,6 +1,7 @@
 {
-  "//": "Only for the lint's type information: the code is plain JavaScript and nothing is compiled.",
+  "//": "Only for the lint's type information: the code is plain JavaScript and nothing is compiled. strict is spelled out: it is TypeScript 6's default, which the community directory's scan uses, and every TypeScript version must read the types the same way.",
   "compilerOptions": {
+    "strict": true,
     "allowJs": true,
     "checkJs": false,
     "noEmit": true,

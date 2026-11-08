@@ -511,7 +511,7 @@ export class DiagramEditor {
     const mark = (/** @type {number | undefined} */ line, /** @type {string} */ cls) => {
       if (Number.isInteger(line)) marks.set(line, `${marks.get(line) ?? ''} ${cls}`.trim());
     };
-    if (this.summary) {
+    if (this.summary && this.renderModel) {
       const { nodes, edges, groups, notes } = this.renderModel;
       for (const item of [...nodes, ...edges, ...groups, ...notes]) {
         if (item.status === 'added' || item.status === 'changed') mark(item.line, `is-${item.status}`);

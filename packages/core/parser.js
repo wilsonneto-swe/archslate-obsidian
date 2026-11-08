@@ -309,8 +309,10 @@ export function parse(text) {
 
   /** @type {DiagramGroup[]} */
   const stack = [];
-  /** @type {DiagramFlow | null} */
-  let flow = null;
+  // The flow whose block is open. parseFlow() and parseFlowLine() set it, so
+  // the type sits on the value: on the declaration, the check after the loop
+  // would take it for the null it starts as.
+  let flow = /** @type {DiagramFlow | null} */ (null);
   /**
    * Links wait for every component to be declared; each gets its key then.
    * @type {DiagramEdge[]}

@@ -206,7 +206,10 @@ function parse(text) {
     markdown: ""
   };
   const stack = [];
-  let flow = null;
+  let flow = (
+    /** @type {DiagramFlow | null} */
+    null
+  );
   const pendingEdges = [];
   const pendingNotes = [];
   const taken = /* @__PURE__ */ new Set();

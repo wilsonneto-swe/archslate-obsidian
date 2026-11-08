@@ -96,9 +96,9 @@ import { routeEdges, ROUTING_DEFAULTS } from './routing.js';
  * @property {number} crossPadEnd The padding inside its box after its members, across the flow.
  * @property {number} mainPadStart The padding inside its box before its members, along the flow.
  * @property {number} mainPadEnd The padding inside its box after its members, along the flow.
- * @property {string[]} [leaves] The ids of all the components inside it.
- * @property {number} [layerMin] The first layer of the components inside it.
- * @property {number} [layerMax] The last layer of the components inside it.
+ * @property {string[]} leaves The ids of all the components inside it.
+ * @property {number} layerMin The first layer of the components inside it.
+ * @property {number} layerMax The last layer of the components inside it.
  * @property {boolean} [empty] True when no component is inside it: it takes its parent's first layer.
  * @property {Map<string, number>} [centers] arrange(): each card's center across the flow, from the group's start, by component id.
  * @property {number} [crossStart] placeCross(): where it starts across the flow.
@@ -115,9 +115,9 @@ import { routeEdges, ROUTING_DEFAULTS } from './routing.js';
  * @property {undefined} [minCross] Never set, like the paddings: the root has no box.
  * @property {undefined} [crossPadStart]
  * @property {undefined} [crossPadEnd]
- * @property {string[]} [leaves] The ids of all the components.
- * @property {number} [layerMin] The first layer.
- * @property {number} [layerMax] The last layer.
+ * @property {string[]} leaves The ids of all the components.
+ * @property {number} layerMin The first layer.
+ * @property {number} layerMax The last layer.
  * @property {boolean} [empty] True when the diagram has no components.
  * @property {number} [size] arrange(): the size of everything across the flow.
  * @property {Map<string, number>} [centers] arrange(): each card's center across the flow, by component id.
@@ -137,9 +137,9 @@ import { routeEdges, ROUTING_DEFAULTS } from './routing.js';
 /**
  * A unit of the tree the layout works on: the root, a unit per group and a unit
  * per component. Sizes and positions are along the flow ("main") or across it
- * ("cross"). buildTree() sets the fields that are not optional, and `leaves`,
- * `layerMin`, `layerMax` and (on an empty container) `empty`; the passes after
- * it fill in the rest.
+ * ("cross"). buildTree() sets the fields that are not optional (a container's
+ * `leaves`, `layerMin` and `layerMax` once its children have theirs) and, on an
+ * empty container, `empty`; the passes after it fill in the rest.
  * @typedef {RootUnit | GroupUnit | NodeUnit} Unit
  */
 
@@ -382,7 +382,7 @@ export function assignLayers(model) {
   for (let pass = 0; pass < 4; pass += 1) {
     for (let i = queue.length - 1; i >= 0; i -= 1) {
       const id = queue[i];
-      const neighbours = [...predecessors.get(id), ...successors.get(id)]
+      const neighbours = [...(predecessors.get(id) ?? []), ...(successors.get(id) ?? [])]
         .map((other) => layer.get(other))
         .sort((a, b) => a - b);
       if (neighbours.length === 0) continue;
