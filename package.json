@@ -1,6 +1,6 @@
 {
   "name": "archslate",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Archslate: system design diagrams as code. An Obsidian plugin and a web page sharing one editor; text is the only source of truth, with versions and visual diffs built in.",
   "homepage": "https://wilsonneto-swe.github.io/archslate-obsidian/",
