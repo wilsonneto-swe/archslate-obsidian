@@ -26,6 +26,11 @@ describe('Archslate in Obsidian', { skip: why ?? false }, () => {
     await sleep(300);
     return shown;
   };
+  // The diagram in front, and every button it shows: class and label, padding, size.
+  const active = (expr) => page.eval(`(() => { const e = app.workspace.getMostRecentLeaf().view.editor; return ${expr}; })()`);
+  const buttons = () => active(`[...e.root.querySelectorAll('button')].filter((b) => b.getClientRects().length).map((b) => { const r = b.getBoundingClientRect(); return { key: b.className + ' ' + (b.getAttribute('aria-label') || b.textContent.trim()), padding: getComputedStyle(b).padding, w: r.width, h: r.height }; })`);
+  /** The buttons as they are on the desktop, to compare with a tablet's. */
+  let desktopButtons = null;
 
   before(async () => {
     app = await ObsidianApp.launch({
@@ -60,6 +65,20 @@ describe('Archslate in Obsidian', { skip: why ?? false }, () => {
     assert.deepEqual(await hover(`${root}.querySelector('.sd-code-input')`), []);
     assert.deepEqual(await hover(`${root}.querySelector('.sd-timeline')`), []);
     assert.deepEqual(await hover(`${root}.querySelector('.sd-zoombar .sd-btn')`), ['Zoom out (-)']);
+  });
+
+  test('the + handles are circles, and the export menu lines up its items', async () => {
+    await active(`(e.select({ type: 'node', id: e.model.nodes[0].id }), 1)`);
+    desktopButtons = await buttons();
+    const handles = desktopButtons.filter((b) => b.key.startsWith('sd-handle'));
+    assert.equal(handles.length, 2, 'the selected component shows its two + handles');
+    for (const { w, h } of handles) assert.equal(w, h, 'a + handle is as wide as it is tall');
+    await active(`(e.canvas.toggleExport([...e.root.querySelectorAll('.sd-btn')].find((b) => /^Export/.test(b.getAttribute('aria-label') ?? ''))), 1)`);
+    const items = await active(`[...e.root.querySelectorAll('.sd-export .sd-menu-item')].map((i) => ({ left: Math.round(i.querySelector('svg').getBoundingClientRect().left), fits: i.scrollHeight <= i.clientHeight + 1 }))`);
+    assert.ok(items.length >= 2, 'the export menu is open');
+    assert.ok(items.every((i) => i.fits), 'each item is tall enough for its title and description');
+    assert.equal(new Set(items.map((i) => i.left)).size, 1, 'the items line up on the left');
+    await active('(e.canvas.closePopover(), e.select(null), 1)');
   });
 
   test('an edit is saved into the note, and only the block changes', async () => {
@@ -191,6 +210,19 @@ describe('Archslate in Obsidian', { skip: why ?? false }, () => {
     await page.waitFor(`app.workspace.getMostRecentLeaf()?.view?.getViewType() === 'archslate'`, { timeout: 15_000 });
     const actions = await page.eval(`[...document.querySelectorAll('.workspace-leaf.mod-active .view-action')].map((a) => a.getAttribute('aria-label')).join(',')`);
     for (const label of ['Undo', 'Redo', 'Fit diagram', 'Open as Markdown']) assert.ok(actions.includes(label), `${label} in ${actions}`);
+    // This window is a tablet to Obsidian, which pads every button 4px 20px there; the editor's buttons keep
+    // their own padding, and the + handles stay circles (issue #2).
+    assert.ok(await page.eval(`document.body.classList.contains('is-tablet')`), 'Obsidian takes this window for a tablet');
+    assert.ok(desktopButtons, 'the desktop buttons were measured');
+    await active(`(e.select({ type: 'node', id: e.model.nodes[0].id }), 1)`);
+    const tablet = await buttons();
+    const handles = tablet.filter((b) => b.key.startsWith('sd-handle'));
+    assert.equal(handles.length, 2);
+    for (const { w, h } of handles) assert.equal(w, h, 'a + handle is as wide as it is tall');
+    const desktop = new Map(desktopButtons.map((b) => [b.key, b.padding]));
+    const both = tablet.filter((b) => desktop.has(b.key));
+    assert.ok(both.length >= 10, `${both.length} buttons to compare`);
+    for (const b of both) assert.equal(b.padding, desktop.get(b.key), b.key);
     await page.eval(`(localStorage.removeItem('EmulateMobile'), 1)`);
   });
 });
