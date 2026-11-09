@@ -9,8 +9,16 @@ block.
   <img src=".github/assets/archslate-obsidian.gif" width="960" alt="An Archslate diagram in Obsidian, its source on the left and the drawing on the right. A cache is typed into the source and appears on the canvas, with its link; then the API is selected on the canvas, Tab adds a queue after it, and the source gets the two new lines">
 </p>
 
-Archslate keeps a diagram as a small, readable language in a code block: `service api "Orders API" x3`,
-`api -> db: write`, `api --> events: OrderPlaced`. The source and the canvas are two views of the same text, so
+Archslate keeps a diagram as a small, readable language in a code block: 
+
+```
+service api "Orders API"
+
+api -> db: write
+api --> events: OrderPlaced
+```
+
+The source and the canvas are two views of the same text, so
 typing a line draws a box, and clicking (+) on the canvas writes the line for you. Layout is automatic. Save a
 version before you change the design, and the **Changes** view shows what was added, removed and changed since.
 Requirements, estimates and trade-offs go below the diagram as ordinary Markdown, in the same note.
@@ -58,8 +66,7 @@ Requirements, estimates and trade-offs go below the diagram as ordinary Markdown
 ## How it compares
 
 Obsidian draws `mermaid` code blocks itself, and several plugins draw diagrams. The table sets out what each one
-says about itself in the [community directory](https://community.obsidian.md/plugins) (read on November 7, 2026);
-"—" means it doesn't say.
+says about itself in the [community directory](https://community.obsidian.md/plugins).
 
 | | A diagram is | Edit by clicking | Edit as text | Versions and a visual diff | Made for |
 | --- | --- | --- | --- | --- | --- |
