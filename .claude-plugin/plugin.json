@@ -1,0 +1,12 @@
+{
+  "name": "archslate",
+  "description": "Write system design diagrams as Markdown notes that open in Archslate (Obsidian and the web app), with a CLI to validate, write, update and version them",
+  "author": {
+    "name": "Wilson Neto",
+    "url": "https://github.com/wilsonneto-swe"
+  },
+  "homepage": "https://wilsonneto-swe.github.io/archslate-obsidian/",
+  "repository": "https://github.com/wilsonneto-swe/archslate-obsidian",
+  "license": "MIT",
+  "keywords": ["system-design", "architecture", "diagrams", "obsidian", "markdown", "archslate"]
+}

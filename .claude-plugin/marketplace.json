@@ -1,0 +1,18 @@
+{
+  "name": "archslate",
+  "owner": {
+    "name": "Wilson Neto",
+    "url": "https://github.com/wilsonneto-swe"
+  },
+  "metadata": {
+    "description": "Archslate's agent skill for Claude Code: system design diagrams as Markdown notes that Archslate draws in Obsidian and on the web"
+  },
+  "plugins": [
+    {
+      "name": "archslate",
+      "description": "Write system design diagrams as Markdown notes that open in Archslate (Obsidian and the web app), with a CLI to validate, write, update and version them",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

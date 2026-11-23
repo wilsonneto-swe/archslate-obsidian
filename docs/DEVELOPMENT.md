@@ -39,6 +39,11 @@ one scene). GIFs are encoded by `scripts/lib/gif.mjs`, with no ffmpeg needed.
 `skills/system-design-diagram/scripts/archslate.mjs` is generated: change `tools/archslate-cli/cli.mjs`, then run
 `npm run build:skill`. `node scripts/examples-source.mjs` writes `examples/*.md` (and the skill's two examples).
 
+`.claude-plugin/` makes the repository a Claude Code plugin marketplace (`marketplace.json`) with one plugin, the
+repository itself (`plugin.json`); Claude Code finds the skill in `skills/`. Run `claude plugin validate .` after
+changing either manifest. Neither sets a `version`, so every commit is a new version for the people who installed it;
+a `version` there would keep them on the cached copy until it changes.
+
 ## Nothing private in public places
 
 This repository and the web page are public. `npm run check:public` scans every file git would publish (or the
