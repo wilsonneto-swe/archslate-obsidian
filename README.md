@@ -206,16 +206,19 @@ from Archslate's own parser and file format, so a note it writes is exactly what
 the outline the diagram will show, with each problem at its line in the note, and `version` saves the current
 diagram before a big change.
 
-Install it in Claude Code by copying the folder into your skills folder, then start a new session:
+This repository is also a Claude Code plugin marketplace, so you can install the skill from it by name. In Claude
+Code, run:
 
 ```
-git clone --depth 1 https://github.com/wilsonneto-swe/archslate-obsidian.git
-mkdir -p ~/.claude/skills && cp -R archslate-obsidian/skills/system-design-diagram ~/.claude/skills/
+/plugin marketplace add wilsonneto-swe/archslate-obsidian
+/plugin install archslate@archslate
 ```
 
-Then ask, for example: "Design a URL shortener in my Obsidian vault, with the read path as a flow." For the Claude
-apps and other agents, see [skills/README.md](skills/README.md). The skill is not part of the plugin: Obsidian never
-loads it, and the plugin's releases do not include it.
+(From a terminal: `claude plugin marketplace add wilsonneto-swe/archslate-obsidian`, then
+`claude plugin install archslate@archslate`.) Start a new session and ask, for example: "Design a URL shortener in
+my Obsidian vault, with the read path as a flow." The skill is `archslate:system-design-diagram`. For updates, other
+ways to install it, the Claude apps and other agents, see [skills/README.md](skills/README.md). The skill is not part
+of the Obsidian plugin: Obsidian never loads it, and the plugin's releases do not include it.
 
 ## Installation
 
@@ -251,7 +254,8 @@ npm run dev                # the web version from the sources: http://localhost:
 
 The plugin's code is in `apps/obsidian/src`; `packages/core` is the language, the layout, the routing of links and
 the file format, and `packages/ui` is the editor (canvas, source pane, versions); `apps/web` is the web version;
-`skills/` holds the agent skill, outside the build. To try a build, run
+`skills/` holds the agent skill, outside the build (`.claude-plugin/` makes the repository a Claude Code plugin
+marketplace that serves it). To try a build, run
 `npm run build:obsidian -- --vault "<path to a test vault>"`: it copies the three files into that vault's
 `.obsidian/plugins/archslate/`. Releases are built by GitHub Actions when a version tag is pushed
 (`.github/workflows/release.yml`), with build attestations. [CONTRIBUTING.md](CONTRIBUTING.md) covers reporting a

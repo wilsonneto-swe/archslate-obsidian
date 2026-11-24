@@ -11,10 +11,12 @@ the web app) draws the block as a diagram and lets the user edit it from text or
 another editor) it reads as a note with a code block. Saved versions sit in a comment at the end of the note.
 
 `scripts/`, `reference/` and `examples/` are in this skill's folder (`<skill folder>` below: the folder that holds
-this SKILL.md). Many agent tools start a new shell for every command, so begin every command that runs the CLI by
-setting its full path, then call it as `node "${AS:?}"`, for example
-`AS="$HOME/.claude/skills/system-design-diagram/scripts/archslate.mjs"; node "${AS:?}" validate "/path/to/vault/URL shortener.md"`
-(use the real folder). With `AS` empty, `${AS:?}` stops the command with a message instead of running nothing.
+this SKILL.md, `${CLAUDE_SKILL_DIR}`: Claude Code fills that path in when it loads the skill, from the Archslate
+plugin or from a skills folder; a tool that leaves it as a placeholder needs the real folder there). Many agent tools
+start a new shell for every command, so begin every command that runs the CLI by setting its full path, then call it
+as `node "${AS:?}"`, for example
+`AS="${CLAUDE_SKILL_DIR}/scripts/archslate.mjs"; node "${AS:?}" validate "/path/to/vault/URL shortener.md"`.
+With `AS` empty, `${AS:?}` stops the command with a message instead of running nothing.
 Give notes by their full path; never `cd` into the skill folder or write notes there. Node 18 or later.
 
 ## 30-second example
@@ -23,7 +25,7 @@ The user asks for "a URL shortener design in my vault". Hand the source to the C
 leave behind), then check the note:
 
 ```bash
-AS="$HOME/.claude/skills/system-design-diagram/scripts/archslate.mjs"
+AS="${CLAUDE_SKILL_DIR}/scripts/archslate.mjs"
 node "${AS:?}" new "/path/to/vault/URL shortener.md" --from - <<'SRC'
 # URL shortener
 direction down
@@ -50,7 +52,7 @@ flow redirect "Follow a short link" {
 ## Requirements
 - Redirect in under 20 ms (p99) for a cached link
 SRC
-AS="$HOME/.claude/skills/system-design-diagram/scripts/archslate.mjs"
+AS="${CLAUDE_SKILL_DIR}/scripts/archslate.mjs"
 node "${AS:?}" validate "/path/to/vault/URL shortener.md"
 ```
 
